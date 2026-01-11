@@ -1,0 +1,8 @@
+.idea/
+/build/
+/cmake-build*/
+*.bpf.o
+*.skel.h
+vmlinux.h
+/aegisbpf
+*.o
