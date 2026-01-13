@@ -15,15 +15,17 @@
 #include <unordered_map>
 #include <vector>
 
-static constexpr size_t kPathMax = 256;
 static constexpr const char *kPinRoot = "/sys/fs/bpf/aegisbpf";
-static constexpr const char *kDenyBloomPin = "/sys/fs/bpf/aegisbpf/deny_bloom";
-static constexpr const char *kDenyExactPin = "/sys/fs/bpf/aegisbpf/deny_exact";
-static constexpr const char *kConfigPin = "/sys/fs/bpf/aegisbpf/config";
-static constexpr const char *kAllowlistPin = "/sys/fs/bpf/aegisbpf/allowlist";
+static constexpr const char *kDenyInodePin = "/sys/fs/bpf/aegisbpf/deny_inode";
+static constexpr const char *kAllowCgroupPin = "/sys/fs/bpf/aegisbpf/allow_cgroup";
+static constexpr const char *kBlockStatsPin = "/sys/fs/bpf/aegisbpf/block_stats";
+static constexpr const char *kDenyCgroupStatsPin = "/sys/fs/bpf/aegisbpf/deny_cgroup_stats";
+static constexpr const char *kDenyInodeStatsPin = "/sys/fs/bpf/aegisbpf/deny_inode_stats";
+static constexpr const char *kAgentMetaPin = "/sys/fs/bpf/aegisbpf/agent_meta";
 static constexpr const char *kBpfObjPath = AEGIS_BPF_OBJ_PATH;
 static constexpr const char *kDenyDbDir = "/var/lib/aegisbpf";
 static constexpr const char *kDenyDbPath = "/var/lib/aegisbpf/deny.db";
+static constexpr uint32_t kLayoutVersion = 1;
 
 enum EventType : uint32_t {
     EVENT_EXEC = 1,
@@ -34,13 +36,19 @@ struct exec_event {
     uint32_t pid;
     uint32_t ppid;
     uint64_t start_time;
+    uint64_t cgid;
     char comm[16];
 };
 
 struct block_event {
+    uint32_t ppid;
+    uint64_t start_time;
+    uint64_t parent_start_time;
     uint32_t pid;
+    uint64_t cgid;
     char comm[16];
-    char filename[kPathMax];
+    uint64_t ino;
+    uint32_t dev;
     char action[8];
 };
 
@@ -52,19 +60,58 @@ struct event {
     };
 };
 
+struct BlockStats {
+    uint64_t blocks;
+    uint64_t ringbuf_drops;
+};
+
+struct InodeId {
+    uint64_t ino;
+    uint32_t dev;
+
+    bool operator==(const InodeId &other) const noexcept
+    {
+        return ino == other.ino && dev == other.dev;
+    }
+};
+
+struct InodeIdHash {
+    std::size_t operator()(const InodeId &id) const noexcept
+    {
+        return std::hash<uint64_t>{}(id.ino) ^ (std::hash<uint32_t>{}(id.dev) << 1);
+    }
+};
+
+using DenyEntries = std::unordered_map<InodeId, std::string, InodeIdHash>;
+
+struct AgentConfig {
+    uint8_t audit_only;
+};
+
+struct AgentMeta {
+    uint32_t layout_version;
+};
+
 struct BpfState {
     bpf_object *obj = nullptr;
     bpf_map *events = nullptr;
-    bpf_map *deny_bloom = nullptr;
-    bpf_map *deny_exact = nullptr;
-    bpf_map *config = nullptr;
-    bpf_map *allowlist = nullptr;
+    bpf_map *deny_inode = nullptr;
+    bpf_map *allow_cgroup = nullptr;
+    bpf_map *block_stats = nullptr;
+    bpf_map *deny_cgroup_stats = nullptr;
+    bpf_map *deny_inode_stats = nullptr;
+    bpf_map *agent_meta = nullptr;
+    bpf_map *config_map = nullptr;
     std::vector<bpf_link *> links;
-    bool bloom_reused = false;
-    bool exact_reused = false;
-    bool config_reused = false;
-    bool allow_reused = false;
+    bool inode_reused = false;
+    bool cgroup_reused = false;
+    bool block_stats_reused = false;
+    bool deny_cgroup_stats_reused = false;
+    bool deny_inode_stats_reused = false;
+    bool agent_meta_reused = false;
 };
+
+static int setup_agent_cgroup(BpfState &state);
 
 static volatile sig_atomic_t exiting;
 
@@ -82,32 +129,6 @@ static int bump_memlock_rlimit()
     return setrlimit(RLIMIT_MEMLOCK, &rlim);
 }
 
-static uint64_t hash_path(const std::string &path)
-{
-    uint64_t hash = 1469598103934665603ULL;
-    size_t max = path.size();
-    if (max > kPathMax - 1)
-        max = kPathMax - 1;
-    for (size_t i = 0; i < max; i++) {
-        uint8_t c = static_cast<uint8_t>(path[i]);
-        if (!c)
-            break;
-        hash ^= c;
-        hash *= 1099511628211ULL;
-    }
-    return hash;
-}
-
-static std::string hash_to_hex(uint64_t h)
-{
-    std::ostringstream oss;
-    oss << std::hex << std::nouppercase;
-    oss.width(16);
-    oss.fill('0');
-    oss << h;
-    return oss.str();
-}
-
 static int ensure_pin_dir()
 {
     if (mkdir(kPinRoot, 0755) && errno != EEXIST)
@@ -122,32 +143,105 @@ static int ensure_db_dir()
     return ec ? -1 : 0;
 }
 
-static std::unordered_map<uint64_t, std::string> read_deny_db()
+static std::string inode_to_string(const InodeId &id)
 {
-    std::unordered_map<uint64_t, std::string> entries;
+    std::ostringstream oss;
+    oss << id.dev << ":" << id.ino;
+    return oss.str();
+}
+
+static bool path_to_inode(const std::string &path, InodeId &id)
+{
+    struct stat st {};
+    if (stat(path.c_str(), &st) != 0) {
+        std::cerr << "stat failed for " << path << ": " << std::strerror(errno) << std::endl;
+        return false;
+    }
+    id.ino = st.st_ino;
+    id.dev = static_cast<uint32_t>(st.st_dev);
+    return true;
+}
+
+static bool path_to_cgid(const std::string &path, uint64_t &cgid)
+{
+    struct stat st {};
+    if (stat(path.c_str(), &st) != 0) {
+        std::cerr << "stat failed for " << path << ": " << std::strerror(errno) << std::endl;
+        return false;
+    }
+    cgid = static_cast<uint64_t>(st.st_ino);
+    return true;
+}
+
+static std::string resolve_cgroup_path(uint64_t cgid)
+{
+    static std::unordered_map<uint64_t, std::string> cache;
+    auto it = cache.find(cgid);
+    if (it != cache.end())
+        return it->second;
+
+    std::error_code ec;
+    std::filesystem::recursive_directory_iterator dir("/sys/fs/cgroup",
+                                                      std::filesystem::directory_options::skip_permission_denied, ec);
+    std::string found;
+    for (; dir != std::filesystem::recursive_directory_iterator(); ++dir) {
+        if (!dir->is_directory())
+            continue;
+        struct stat st {};
+        if (stat(dir->path().c_str(), &st) != 0)
+            continue;
+        if (static_cast<uint64_t>(st.st_ino) == cgid) {
+            found = dir->path().string();
+            break;
+        }
+    }
+    cache[cgid] = found;
+    return found;
+}
+
+static size_t map_entry_count(bpf_map *map)
+{
+    if (!map)
+        return 0;
+    const size_t key_sz = bpf_map__key_size(map);
+    std::vector<uint8_t> key(key_sz);
+    std::vector<uint8_t> next_key(key_sz);
+    size_t count = 0;
+    int fd = bpf_map__fd(map);
+    int rc = bpf_map_get_next_key(fd, nullptr, key.data());
+    while (!rc) {
+        ++count;
+        rc = bpf_map_get_next_key(fd, key.data(), next_key.data());
+        key.swap(next_key);
+    }
+    return count;
+}
+
+static DenyEntries read_deny_db()
+{
+    DenyEntries entries;
     std::ifstream in(kDenyDbPath);
     if (!in.is_open())
         return entries;
     std::string line;
     while (std::getline(in, line)) {
         std::istringstream iss(line);
-        std::string hex;
+        uint32_t dev = 0;
+        uint64_t ino = 0;
         std::string path;
-        if (!(iss >> hex))
+        if (!(iss >> dev >> ino))
             continue;
         if (!(iss >> path))
             path.clear();
-        try {
-            uint64_t h = std::stoull(hex, nullptr, 16);
-            entries[h] = path;
-        } catch (...) {
-            continue;
-        }
+        InodeId id {};
+        id.ino = ino;
+        id.dev = dev;
+        entries[id] = path;
     }
     return entries;
 }
 
-static int write_deny_db(const std::unordered_map<uint64_t, std::string> &entries)
+static int write_deny_db(const DenyEntries &entries)
 {
     if (ensure_db_dir())
         return -1;
@@ -155,7 +249,7 @@ static int write_deny_db(const std::unordered_map<uint64_t, std::string> &entrie
     if (!out.is_open())
         return -1;
     for (const auto &kv : entries) {
-        out << hash_to_hex(kv.first);
+        out << kv.first.dev << " " << kv.first.ino;
         if (!kv.second.empty())
             out << " " << kv.second;
         out << "\n";
@@ -208,32 +302,46 @@ static int load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
         return -errno;
 
     state.events = bpf_object__find_map_by_name(state.obj, "events");
-    state.deny_bloom = bpf_object__find_map_by_name(state.obj, "deny_bloom");
-    state.deny_exact = bpf_object__find_map_by_name(state.obj, "deny_exact");
-    state.config = bpf_object__find_map_by_name(state.obj, "cfg_map");
-    state.allowlist = bpf_object__find_map_by_name(state.obj, "allowlist");
-    if (!state.events || !state.deny_bloom || !state.deny_exact || !state.config || !state.allowlist) {
+    state.deny_inode = bpf_object__find_map_by_name(state.obj, "deny_inode_map");
+    state.allow_cgroup = bpf_object__find_map_by_name(state.obj, "allow_cgroup_map");
+    state.block_stats = bpf_object__find_map_by_name(state.obj, "block_stats");
+    state.deny_cgroup_stats = bpf_object__find_map_by_name(state.obj, "deny_cgroup_stats");
+    state.deny_inode_stats = bpf_object__find_map_by_name(state.obj, "deny_inode_stats");
+    state.agent_meta = bpf_object__find_map_by_name(state.obj, "agent_meta_map");
+    state.config_map = bpf_object__find_map_by_name(state.obj, "agent_config_map");
+    if (!state.events || !state.deny_inode || !state.allow_cgroup || !state.block_stats ||
+        !state.deny_cgroup_stats || !state.deny_inode_stats || !state.agent_meta || !state.config_map) {
         cleanup_bpf(state);
         return -ENOENT;
     }
 
     if (reuse_pins) {
-        int err = reuse_pinned_map(state.deny_bloom, kDenyBloomPin, state.bloom_reused);
+        int err = reuse_pinned_map(state.deny_inode, kDenyInodePin, state.inode_reused);
         if (err) {
             cleanup_bpf(state);
             return err;
         }
-        err = reuse_pinned_map(state.deny_exact, kDenyExactPin, state.exact_reused);
+        err = reuse_pinned_map(state.allow_cgroup, kAllowCgroupPin, state.cgroup_reused);
         if (err) {
             cleanup_bpf(state);
             return err;
         }
-        err = reuse_pinned_map(state.config, kConfigPin, state.config_reused);
+        err = reuse_pinned_map(state.block_stats, kBlockStatsPin, state.block_stats_reused);
         if (err) {
             cleanup_bpf(state);
             return err;
         }
-        err = reuse_pinned_map(state.allowlist, kAllowlistPin, state.allow_reused);
+        err = reuse_pinned_map(state.deny_cgroup_stats, kDenyCgroupStatsPin, state.deny_cgroup_stats_reused);
+        if (err) {
+            cleanup_bpf(state);
+            return err;
+        }
+        err = reuse_pinned_map(state.deny_inode_stats, kDenyInodeStatsPin, state.deny_inode_stats_reused);
+        if (err) {
+            cleanup_bpf(state);
+            return err;
+        }
+        err = reuse_pinned_map(state.agent_meta, kAgentMetaPin, state.agent_meta_reused);
         if (err) {
             cleanup_bpf(state);
             return err;
@@ -246,34 +354,49 @@ static int load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
         return err;
     }
 
-    if (!state.bloom_reused || !state.exact_reused || !state.config_reused || !state.allow_reused) {
+    if (!state.inode_reused || !state.cgroup_reused || !state.block_stats_reused ||
+        !state.deny_cgroup_stats_reused || !state.deny_inode_stats_reused || !state.agent_meta_reused) {
         if (ensure_pin_dir()) {
             cleanup_bpf(state);
             return -errno;
         }
-        if (!state.bloom_reused) {
-            err = pin_map(state.deny_bloom, kDenyBloomPin);
+        if (!state.inode_reused) {
+            err = pin_map(state.deny_inode, kDenyInodePin);
             if (err) {
                 cleanup_bpf(state);
                 return err;
             }
         }
-        if (!state.exact_reused) {
-            err = pin_map(state.deny_exact, kDenyExactPin);
+        if (!state.cgroup_reused) {
+            err = pin_map(state.allow_cgroup, kAllowCgroupPin);
             if (err) {
                 cleanup_bpf(state);
                 return err;
             }
         }
-        if (!state.config_reused) {
-            err = pin_map(state.config, kConfigPin);
+        if (!state.block_stats_reused) {
+            err = pin_map(state.block_stats, kBlockStatsPin);
             if (err) {
                 cleanup_bpf(state);
                 return err;
             }
         }
-        if (!state.allow_reused) {
-            err = pin_map(state.allowlist, kAllowlistPin);
+        if (!state.deny_cgroup_stats_reused) {
+            err = pin_map(state.deny_cgroup_stats, kDenyCgroupStatsPin);
+            if (err) {
+                cleanup_bpf(state);
+                return err;
+            }
+        }
+        if (!state.deny_inode_stats_reused) {
+            err = pin_map(state.deny_inode_stats, kDenyInodeStatsPin);
+            if (err) {
+                cleanup_bpf(state);
+                return err;
+            }
+        }
+        if (!state.agent_meta_reused) {
+            err = pin_map(state.agent_meta, kAgentMetaPin);
             if (err) {
                 cleanup_bpf(state);
                 return err;
@@ -282,6 +405,8 @@ static int load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
     }
 
     if (attach_links) {
+        // Legacy path: attach immediately.
+        // Prefer using attach_all after any required map seeding.
         bpf_program *prog = bpf_object__find_program_by_name(state.obj, "handle_execve");
         if (!prog) {
             cleanup_bpf(state);
@@ -293,7 +418,7 @@ static int load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
             return err;
         }
 
-        prog = bpf_object__find_program_by_name(state.obj, "handle_openat");
+        prog = bpf_object__find_program_by_name(state.obj, "handle_file_open");
         if (!prog) {
             cleanup_bpf(state);
             return -ENOENT;
@@ -330,21 +455,173 @@ static int load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
     return 0;
 }
 
+static int attach_all(BpfState &state)
+{
+    int err;
+    bpf_program *prog = bpf_object__find_program_by_name(state.obj, "handle_execve");
+    if (!prog)
+        return -ENOENT;
+    err = attach_prog(prog, state);
+    if (err)
+        return err;
+
+    prog = bpf_object__find_program_by_name(state.obj, "handle_file_open");
+    if (!prog)
+        return -ENOENT;
+    err = attach_prog(prog, state);
+    if (err)
+        return err;
+
+    prog = bpf_object__find_program_by_name(state.obj, "handle_fork");
+    if (!prog)
+        return -ENOENT;
+    err = attach_prog(prog, state);
+    if (err)
+        return err;
+
+    prog = bpf_object__find_program_by_name(state.obj, "handle_exit");
+    if (!prog)
+        return -ENOENT;
+    err = attach_prog(prog, state);
+    if (err)
+        return err;
+
+    return 0;
+}
+
+static std::string to_string(const char *buf, size_t sz)
+{
+    return std::string(buf, strnlen(buf, sz));
+}
+
+static std::string json_escape(const std::string &in)
+{
+    std::string out;
+    out.reserve(in.size() + 4);
+    for (char c : in) {
+        switch (c) {
+        case '\\':
+            out += "\\\\";
+            break;
+        case '"':
+            out += "\\\"";
+            break;
+        default:
+            out += c;
+            break;
+        }
+    }
+    return out;
+}
+
+static void print_exec_event(const exec_event &ev)
+{
+    std::ostringstream oss;
+    std::string cgpath = resolve_cgroup_path(ev.cgid);
+    oss << "{\"type\":\"exec\",\"pid\":" << ev.pid << ",\"ppid\":" << ev.ppid
+        << ",\"start_time\":" << ev.start_time << ",\"cgid\":" << ev.cgid
+        << ",\"cgroup_path\":\"" << json_escape(cgpath) << "\""
+        << ",\"comm\":\"" << json_escape(to_string(ev.comm, sizeof(ev.comm))) << "\"}";
+    std::cout << oss.str() << std::endl;
+}
+
+static void print_block_event(const block_event &ev)
+{
+    std::ostringstream oss;
+    std::string cgpath = resolve_cgroup_path(ev.cgid);
+    oss << "{\"type\":\"block\",\"pid\":" << ev.pid << ",\"ppid\":" << ev.ppid
+        << ",\"start_time\":" << ev.start_time << ",\"parent_start_time\":" << ev.parent_start_time
+        << ",\"cgid\":" << ev.cgid << ",\"cgroup_path\":\"" << json_escape(cgpath) << "\""
+        << ",\"ino\":" << ev.ino << ",\"dev\":" << ev.dev << ",\"action\":\""
+        << json_escape(to_string(ev.action, sizeof(ev.action))) << "\",\"comm\":\""
+        << json_escape(to_string(ev.comm, sizeof(ev.comm))) << "\"}";
+    std::cout << oss.str() << std::endl;
+}
+
 static int handle_event(void *, void *data, size_t)
 {
     const auto *e = static_cast<const event *>(data);
     if (e->type == EVENT_EXEC) {
-        std::cout << "[EXEC] pid=" << e->exec.pid << " ppid=" << e->exec.ppid
-                  << " comm=" << e->exec.comm << std::endl;
+        print_exec_event(e->exec);
     } else if (e->type == EVENT_BLOCK) {
-        std::cout << "[BLOCK] pid=" << e->block.pid << " comm=" << e->block.comm
-                  << " file=" << e->block.filename << " action=" << e->block.action << std::endl;
+        print_block_event(e->block);
     }
     return 0;
 }
 
-static int run(bool enforce_mode)
+static int set_agent_config(BpfState &state, bool audit_only)
 {
+    if (!state.config_map)
+        return -ENOENT;
+
+    uint32_t key = 0;
+    AgentConfig cfg {};
+    cfg.audit_only = audit_only ? 1 : 0;
+    if (bpf_map_update_elem(bpf_map__fd(state.config_map), &key, &cfg, BPF_ANY)) {
+        std::cerr << "Failed to configure BPF audit mode: " << std::strerror(errno) << std::endl;
+        return -errno;
+    }
+    return 0;
+}
+
+static int ensure_layout_version(BpfState &state)
+{
+    if (!state.agent_meta)
+        return -ENOENT;
+
+    uint32_t key = 0;
+    AgentMeta meta {};
+    int fd = bpf_map__fd(state.agent_meta);
+    if (bpf_map_lookup_elem(fd, &key, &meta) && errno != ENOENT) {
+        std::cerr << "Failed to read agent_meta_map: " << std::strerror(errno) << std::endl;
+        return -errno;
+    }
+    if (meta.layout_version == 0) {
+        meta.layout_version = kLayoutVersion;
+        if (bpf_map_update_elem(fd, &key, &meta, BPF_ANY)) {
+            std::cerr << "Failed to set agent layout version: " << std::strerror(errno) << std::endl;
+            return -errno;
+        }
+        return 0;
+    }
+    if (meta.layout_version != kLayoutVersion) {
+        std::cerr << "Pinned maps layout version mismatch (found " << meta.layout_version
+                  << ", expected " << kLayoutVersion << ")" << std::endl;
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static bool check_prereqs()
+{
+    if (!std::filesystem::exists("/sys/fs/cgroup/cgroup.controllers")) {
+        std::cerr << "cgroup v2 is required at /sys/fs/cgroup" << std::endl;
+        return false;
+    }
+    if (!std::filesystem::exists("/sys/fs/bpf")) {
+        std::cerr << "bpffs is not mounted at /sys/fs/bpf" << std::endl;
+        return false;
+    }
+    {
+        std::ifstream lsm("/sys/kernel/security/lsm");
+        std::string line;
+        if (!lsm.is_open() || !std::getline(lsm, line)) {
+            std::cerr << "Unable to read /sys/kernel/security/lsm" << std::endl;
+            return false;
+        }
+        if (line.find("bpf") == std::string::npos) {
+            std::cerr << "BPF LSM is not enabled (missing \"bpf\" in /sys/kernel/security/lsm)" << std::endl;
+            return false;
+        }
+    }
+    return true;
+}
+
+static int run(bool audit_only)
+{
+    if (!check_prereqs())
+        return 1;
+
     if (bump_memlock_rlimit()) {
         std::cerr << "Failed to raise memlock rlimit: " << std::strerror(errno) << std::endl;
         return 1;
@@ -354,39 +631,32 @@ static int run(bool enforce_mode)
     std::signal(SIGTERM, handle_signal);
 
     BpfState state;
-    int err = load_bpf(true, true, state);
+    int err = load_bpf(true, false, state);
     if (err) {
         std::cerr << "Failed to load BPF object: " << std::strerror(-err) << std::endl;
         return 1;
     }
 
-    uint32_t key = 0;
-    uint8_t enforce = enforce_mode ? 1 : 0;
-    if (bpf_map_update_elem(bpf_map__fd(state.config), &key, &enforce, BPF_ANY)) {
-        std::cerr << "Failed to set config: " << std::strerror(errno) << std::endl;
+    err = ensure_layout_version(state);
+    if (err) {
         cleanup_bpf(state);
         return 1;
     }
 
-    auto ensure_allow = [&](const std::string &c) -> int {
-        char keybuf[16] = {};
-        size_t len = c.size();
-        if (len >= sizeof(keybuf))
-            len = sizeof(keybuf) - 1;
-        std::memcpy(keybuf, c.data(), len);
-        uint8_t one = 1;
-        if (bpf_map_update_elem(bpf_map__fd(state.allowlist), keybuf, &one, BPF_ANY))
-            return -errno;
-        return 0;
-    };
-
-    if (ensure_allow("sudo")) {
-        std::cerr << "Failed to seed allowlist" << std::endl;
+    err = set_agent_config(state, audit_only);
+    if (err) {
         cleanup_bpf(state);
         return 1;
     }
-    if (ensure_allow("aegisbpf")) {
-        std::cerr << "Failed to seed allowlist" << std::endl;
+
+    if (setup_agent_cgroup(state)) {
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    err = attach_all(state);
+    if (err) {
+        std::cerr << "Failed to attach programs: " << std::strerror(-err) << std::endl;
         cleanup_bpf(state);
         return 1;
     }
@@ -420,92 +690,31 @@ static int deny_path(const std::string &path)
     return 0;
 }
 
-static int allow_add(const std::string &comm)
+// Populate the inode deny map using a real path (symlinks resolved).
+static int block_file(const std::string &path)
 {
-    if (comm.empty() || comm.size() >= 16) {
-        std::cerr << "comm too long" << std::endl;
+    if (path.empty()) {
+        std::cerr << "Path is empty" << std::endl;
         return 1;
     }
 
-    int fd = bpf_obj_get(kAllowlistPin);
-    BpfState state;
-    if (fd < 0) {
-        int err = load_bpf(true, false, state);
-        if (err) {
-            std::cerr << "Failed to load BPF object: " << std::strerror(-err) << std::endl;
-            return 1;
-        }
-        fd = bpf_map__fd(state.allowlist);
-        char keybuf[16] = {};
-        std::memcpy(keybuf, comm.data(), comm.size());
-        uint8_t one = 1;
-        int rc = bpf_map_update_elem(fd, keybuf, &one, BPF_ANY);
-        cleanup_bpf(state);
-        if (rc) {
-            std::cerr << "Failed to add allow: " << std::strerror(errno) << std::endl;
-            return 1;
-        }
-        return 0;
-    }
-
-    char keybuf[16] = {};
-    std::memcpy(keybuf, comm.data(), comm.size());
-    uint8_t one = 1;
-    if (bpf_map_update_elem(fd, keybuf, &one, BPF_ANY)) {
-        std::cerr << "Failed to add allow: " << std::strerror(errno) << std::endl;
-        close(fd);
-        return 1;
-    }
-    close(fd);
-    return 0;
-}
-
-static int allow_del(const std::string &comm)
-{
-    if (comm.empty() || comm.size() >= 16) {
-        std::cerr << "comm too long" << std::endl;
-        return 1;
-    }
-    int fd = bpf_obj_get(kAllowlistPin);
-    if (fd < 0) {
-        std::cerr << "Allowlist not found" << std::endl;
-        return 1;
-    }
-    char keybuf[16] = {};
-    std::memcpy(keybuf, comm.data(), comm.size());
-    if (bpf_map_delete_elem(fd, keybuf)) {
-        std::cerr << "Failed to delete allow: " << std::strerror(errno) << std::endl;
-        close(fd);
-        return 1;
-    }
-    close(fd);
-    return 0;
-}
-
-static int allow_list()
-{
-    int fd = bpf_obj_get(kAllowlistPin);
-    if (fd < 0) {
-        std::cerr << "Allowlist not found" << std::endl;
+    std::error_code ec;
+    std::filesystem::path resolved = std::filesystem::canonical(path, ec);
+    if (ec) {
+        std::cerr << "Failed to resolve path '" << path << "': " << ec.message() << std::endl;
         return 1;
     }
 
-    char key[16] = {};
-    char next_key[16] = {};
-    uint8_t val;
-    int rc = bpf_map_get_next_key(fd, nullptr, key);
-    while (!rc) {
-        if (!bpf_map_lookup_elem(fd, key, &val))
-            std::cout << key << std::endl;
-        rc = bpf_map_get_next_key(fd, key, next_key);
-        std::memcpy(key, next_key, sizeof(key));
+    struct stat st {};
+    if (stat(resolved.c_str(), &st) != 0) {
+        std::cerr << "stat failed for " << resolved << ": " << std::strerror(errno) << std::endl;
+        return 1;
     }
-    close(fd);
-    return 0;
-}
 
-static int deny_add(const std::string &path)
-{
+    InodeId id {};
+    id.ino = st.st_ino;
+    id.dev = static_cast<uint32_t>(st.st_dev);
+
     if (bump_memlock_rlimit()) {
         std::cerr << "Failed to raise memlock rlimit: " << std::strerror(errno) << std::endl;
         return 1;
@@ -518,46 +727,182 @@ static int deny_add(const std::string &path)
         return 1;
     }
 
-    uint64_t hash = hash_path(path);
     uint8_t one = 1;
-
-    if (bpf_map_update_elem(bpf_map__fd(state.deny_bloom), nullptr, &hash, BPF_ANY)) {
-        std::cerr << "Failed to update deny_bloom: " << std::strerror(errno) << std::endl;
-        cleanup_bpf(state);
-        return 1;
-    }
-    if (bpf_map_update_elem(bpf_map__fd(state.deny_exact), &hash, &one, BPF_ANY)) {
-        std::cerr << "Failed to update deny_exact: " << std::strerror(errno) << std::endl;
+    if (bpf_map_update_elem(bpf_map__fd(state.deny_inode), &id, &one, BPF_ANY)) {
+        std::cerr << "Failed to update deny_inode_map: " << std::strerror(errno) << std::endl;
         cleanup_bpf(state);
         return 1;
     }
 
     auto entries = read_deny_db();
-    entries[hash] = path;
+    entries[id] = resolved.string();
     write_deny_db(entries);
 
     cleanup_bpf(state);
     return 0;
 }
 
-static int deny_del(const std::string &path)
+static int read_block_stats_map(bpf_map *map, BlockStats &out)
 {
-    uint64_t hash = hash_path(path);
-    int exact_fd = bpf_obj_get(kDenyExactPin);
-    if (exact_fd < 0) {
-        std::cerr << "Deny maps not found" << std::endl;
+    int fd = bpf_map__fd(map);
+    int cpu_cnt = libbpf_num_possible_cpus();
+    if (cpu_cnt <= 0) {
+        std::cerr << "libbpf_num_possible_cpus failed" << std::endl;
         return 1;
     }
-    bpf_map_delete_elem(exact_fd, &hash);
-    close(exact_fd);
+    std::vector<BlockStats> vals(cpu_cnt);
+    uint32_t key = 0;
+    if (bpf_map_lookup_elem(fd, &key, vals.data())) {
+        std::cerr << "Failed to read block_stats: " << std::strerror(errno) << std::endl;
+        return 1;
+    }
+    out = {};
+    for (const auto &v : vals) {
+        out.blocks += v.blocks;
+        out.ringbuf_drops += v.ringbuf_drops;
+    }
+    return 0;
+}
+
+static int read_cgroup_block_counts(bpf_map *map, std::vector<std::pair<uint64_t, uint64_t>> &out)
+{
+    int fd = bpf_map__fd(map);
+    int cpu_cnt = libbpf_num_possible_cpus();
+    if (cpu_cnt <= 0) {
+        std::cerr << "libbpf_num_possible_cpus failed" << std::endl;
+        return 1;
+    }
+    std::vector<uint64_t> vals(cpu_cnt);
+    uint64_t key = 0;
+    uint64_t next_key = 0;
+    int rc = bpf_map_get_next_key(fd, nullptr, &key);
+    while (!rc) {
+        if (bpf_map_lookup_elem(fd, &key, vals.data())) {
+            std::cerr << "Failed to read deny_cgroup_stats: " << std::strerror(errno) << std::endl;
+            return 1;
+        }
+        uint64_t sum = 0;
+        for (uint64_t v : vals)
+            sum += v;
+        out.emplace_back(key, sum);
+        rc = bpf_map_get_next_key(fd, &key, &next_key);
+        key = next_key;
+    }
+    return 0;
+}
+
+static int read_inode_block_counts(bpf_map *map, std::vector<std::pair<InodeId, uint64_t>> &out)
+{
+    int fd = bpf_map__fd(map);
+    int cpu_cnt = libbpf_num_possible_cpus();
+    if (cpu_cnt <= 0) {
+        std::cerr << "libbpf_num_possible_cpus failed" << std::endl;
+        return 1;
+    }
+    std::vector<uint64_t> vals(cpu_cnt);
+    InodeId key {};
+    InodeId next_key {};
+    int rc = bpf_map_get_next_key(fd, nullptr, &key);
+    while (!rc) {
+        if (bpf_map_lookup_elem(fd, &key, vals.data())) {
+            std::cerr << "Failed to read deny_inode_stats: " << std::strerror(errno) << std::endl;
+            return 1;
+        }
+        uint64_t sum = 0;
+        for (uint64_t v : vals)
+            sum += v;
+        out.emplace_back(key, sum);
+        rc = bpf_map_get_next_key(fd, &key, &next_key);
+        key = next_key;
+    }
+    return 0;
+}
+
+static int reset_block_stats_map(bpf_map *map)
+{
+    int fd = bpf_map__fd(map);
+    int cpu_cnt = libbpf_num_possible_cpus();
+    if (cpu_cnt <= 0) {
+        std::cerr << "libbpf_num_possible_cpus failed" << std::endl;
+        return 1;
+    }
+    std::vector<BlockStats> zeros(cpu_cnt);
+    uint32_t key = 0;
+    if (bpf_map_update_elem(fd, &key, zeros.data(), BPF_ANY)) {
+        std::cerr << "Failed to reset block_stats: " << std::strerror(errno) << std::endl;
+        return 1;
+    }
+    return 0;
+}
+
+static int block_add(const std::string &path)
+{
+    return block_file(path);
+}
+
+// Place current process into a dedicated cgroup v2 and allow that cgroup in the BPF map.
+static int setup_agent_cgroup(BpfState &state)
+{
+    static constexpr const char *kAgentCgroup = "/sys/fs/cgroup/aegis_agent";
+
+    std::error_code ec;
+    std::filesystem::create_directories(kAgentCgroup, ec);
+    if (ec) {
+        std::cerr << "Failed to create cgroup " << kAgentCgroup << ": " << ec.message() << std::endl;
+        return 1;
+    }
+
+    std::ofstream procs(std::string(kAgentCgroup) + "/cgroup.procs", std::ios::out | std::ios::trunc);
+    if (!procs.is_open()) {
+        std::cerr << "Failed to open cgroup.procs for " << kAgentCgroup << std::endl;
+        return 1;
+    }
+    procs << getpid();
+    procs.close();
+
+    struct stat st {};
+    if (stat(kAgentCgroup, &st) != 0) {
+        std::cerr << "stat failed for " << kAgentCgroup << ": " << std::strerror(errno) << std::endl;
+        return 1;
+    }
+
+    uint64_t cgid = static_cast<uint64_t>(st.st_ino);
+
+    if (bump_memlock_rlimit()) {
+        std::cerr << "Failed to raise memlock rlimit: " << std::strerror(errno) << std::endl;
+        return 1;
+    }
+
+    uint8_t one = 1;
+    if (bpf_map_update_elem(bpf_map__fd(state.allow_cgroup), &cgid, &one, BPF_ANY)) {
+        std::cerr << "Failed to update allow_cgroup_map: " << std::strerror(errno) << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+
+static int block_del(const std::string &path)
+{
+    InodeId id {};
+    if (!path_to_inode(path, id))
+        return 1;
+
+    int map_fd = bpf_obj_get(kDenyInodePin);
+    if (map_fd < 0) {
+        std::cerr << "deny_inode_map not found" << std::endl;
+        return 1;
+    }
+    bpf_map_delete_elem(map_fd, &id);
+    close(map_fd);
 
     auto entries = read_deny_db();
-    entries.erase(hash);
+    entries.erase(id);
     write_deny_db(entries);
     return 0;
 }
 
-static int deny_list()
+static int block_list()
 {
     BpfState state;
     int err = load_bpf(true, false, state);
@@ -567,16 +912,16 @@ static int deny_list()
     }
 
     auto db = read_deny_db();
-    uint64_t key = 0;
-    uint64_t next_key = 0;
-    int rc = bpf_map_get_next_key(bpf_map__fd(state.deny_exact), nullptr, &key);
+    InodeId key {};
+    InodeId next_key {};
+    int rc = bpf_map_get_next_key(bpf_map__fd(state.deny_inode), nullptr, &key);
     while (!rc) {
         auto it = db.find(key);
-        if (it != db.end())
-            std::cout << it->second << " (" << hash_to_hex(key) << ")" << std::endl;
+        if (it != db.end() && !it->second.empty())
+            std::cout << it->second << " (" << inode_to_string(key) << ")" << std::endl;
         else
-            std::cout << hash_to_hex(key) << std::endl;
-        rc = bpf_map_get_next_key(bpf_map__fd(state.deny_exact), &key, &next_key);
+            std::cout << inode_to_string(key) << std::endl;
+        rc = bpf_map_get_next_key(bpf_map__fd(state.deny_inode), &key, &next_key);
         key = next_key;
     }
 
@@ -584,10 +929,12 @@ static int deny_list()
     return 0;
 }
 
-static int deny_clear()
+static int block_clear()
 {
-    std::remove(kDenyBloomPin);
-    std::remove(kDenyExactPin);
+    std::remove(kDenyInodePin);
+    std::remove(kAllowCgroupPin);
+    std::remove(kDenyCgroupStatsPin);
+    std::remove(kDenyInodeStatsPin);
     std::filesystem::remove(kDenyDbPath);
 
     if (bump_memlock_rlimit()) {
@@ -601,13 +948,147 @@ static int deny_clear()
         std::cerr << "Failed to reload BPF object: " << std::strerror(-err) << std::endl;
         return 1;
     }
+    if (state.block_stats)
+        reset_block_stats_map(state.block_stats);
+    cleanup_bpf(state);
+    return 0;
+}
+
+static int allow_add(const std::string &path)
+{
+    uint64_t cgid = 0;
+    if (!path_to_cgid(path, cgid))
+        return 1;
+
+    if (bump_memlock_rlimit()) {
+        std::cerr << "Failed to raise memlock rlimit: " << std::strerror(errno) << std::endl;
+        return 1;
+    }
+
+    BpfState state;
+    int err = load_bpf(true, false, state);
+    if (err) {
+        std::cerr << "Failed to load BPF object: " << std::strerror(-err) << std::endl;
+        return 1;
+    }
+
+    uint8_t one = 1;
+    if (bpf_map_update_elem(bpf_map__fd(state.allow_cgroup), &cgid, &one, BPF_ANY)) {
+        std::cerr << "Failed to update allow_cgroup_map: " << std::strerror(errno) << std::endl;
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    cleanup_bpf(state);
+    return 0;
+}
+
+static int allow_del(const std::string &path)
+{
+    uint64_t cgid = 0;
+    if (!path_to_cgid(path, cgid))
+        return 1;
+
+    int fd = bpf_obj_get(kAllowCgroupPin);
+    if (fd < 0) {
+        std::cerr << "allow_cgroup_map not found" << std::endl;
+        return 1;
+    }
+    bpf_map_delete_elem(fd, &cgid);
+    close(fd);
+    return 0;
+}
+
+static int allow_list()
+{
+    BpfState state;
+    int err = load_bpf(true, false, state);
+    if (err) {
+        std::cerr << "Failed to load BPF object: " << std::strerror(-err) << std::endl;
+        return 1;
+    }
+
+    uint64_t key = 0;
+    uint64_t next_key = 0;
+    int rc = bpf_map_get_next_key(bpf_map__fd(state.allow_cgroup), nullptr, &key);
+    while (!rc) {
+        std::cout << key << std::endl;
+        rc = bpf_map_get_next_key(bpf_map__fd(state.allow_cgroup), &key, &next_key);
+        key = next_key;
+    }
+
+    cleanup_bpf(state);
+    return 0;
+}
+
+static int print_stats()
+{
+    BpfState state;
+    int err = load_bpf(true, false, state);
+    if (err) {
+        std::cerr << "Failed to load BPF object: " << std::strerror(-err) << std::endl;
+        return 1;
+    }
+
+    BlockStats stats {};
+    if (read_block_stats_map(state.block_stats, stats)) {
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    std::vector<std::pair<uint64_t, uint64_t>> cgroup_blocks;
+    if (read_cgroup_block_counts(state.deny_cgroup_stats, cgroup_blocks)) {
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    std::vector<std::pair<InodeId, uint64_t>> inode_blocks;
+    if (read_inode_block_counts(state.deny_inode_stats, inode_blocks)) {
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    size_t deny_sz = map_entry_count(state.deny_inode);
+    size_t allow_sz = map_entry_count(state.allow_cgroup);
+
+    std::cout << "deny_inode entries: " << deny_sz << "\n"
+              << "allow_cgroup entries: " << allow_sz << "\n"
+              << "blocks: " << stats.blocks << "\n"
+              << "ringbuf_drops: " << stats.ringbuf_drops << std::endl;
+
+    if (!cgroup_blocks.empty()) {
+        std::cout << "blocks_by_cgroup:\n";
+        for (const auto &kv : cgroup_blocks) {
+            std::string path = resolve_cgroup_path(kv.first);
+            if (!path.empty())
+                std::cout << "  " << path << " (" << kv.first << "): " << kv.second << "\n";
+            else
+                std::cout << "  " << kv.first << ": " << kv.second << "\n";
+        }
+    }
+    if (!inode_blocks.empty()) {
+        auto db = read_deny_db();
+        std::cout << "blocks_by_inode:\n";
+        for (const auto &kv : inode_blocks) {
+            auto it = db.find(kv.first);
+            if (it != db.end() && !it->second.empty())
+                std::cout << "  " << it->second << " (" << inode_to_string(kv.first) << "): " << kv.second << "\n";
+            else
+                std::cout << "  " << inode_to_string(kv.first) << ": " << kv.second << "\n";
+        }
+    }
+
     cleanup_bpf(state);
     return 0;
 }
 
 static int usage(const char *prog)
 {
-    std::cerr << "Usage: " << prog << " run [--enforce] | deny {add|del|list|clear} [path] | allow {add|del|list} [comm]" << std::endl;
+    std::cerr << "Usage: " << prog
+              << " run [--audit|--enforce]"
+              << " | block {add|del|list|clear} [path]"
+              << " | allow {add|del} <cgroup_path> | allow list"
+              << " | stats" << std::endl;
     return 1;
 }
 
@@ -618,33 +1099,35 @@ int main(int argc, char **argv)
 
     std::string cmd = argv[1];
     if (cmd == "run") {
-        bool enforce_mode = false;
-        if (argc == 3) {
-            if (std::string(argv[2]) == "--enforce")
-                enforce_mode = true;
-            else
+        bool audit_only = false;
+        for (int i = 2; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--audit" || arg == "--mode=audit") {
+                audit_only = true;
+            } else if (arg == "--enforce" || arg == "--mode=enforce") {
+                audit_only = false;
+            } else {
                 return usage(argv[0]);
-        } else if (argc > 3) {
-            return usage(argv[0]);
+            }
         }
-        return run(enforce_mode);
+        return run(audit_only);
     }
-    if (cmd == "deny") {
+    if (cmd == "block") {
         if (argc < 3)
             return usage(argv[0]);
         std::string sub = argv[2];
         if (sub == "add") {
             if (argc < 4)
                 return usage(argv[0]);
-            return deny_add(argv[3]);
+            return block_add(argv[3]);
         } else if (sub == "del") {
             if (argc < 4)
                 return usage(argv[0]);
-            return deny_del(argv[3]);
+            return block_del(argv[3]);
         } else if (sub == "list") {
-            return deny_list();
+            return block_list();
         } else if (sub == "clear") {
-            return deny_clear();
+            return block_clear();
         } else {
             return usage(argv[0]);
         }
@@ -662,10 +1145,17 @@ int main(int argc, char **argv)
                 return usage(argv[0]);
             return allow_del(argv[3]);
         } else if (sub == "list") {
+            if (argc > 3)
+                return usage(argv[0]);
             return allow_list();
         } else {
             return usage(argv[0]);
         }
+    }
+    if (cmd == "stats") {
+        if (argc > 2)
+            return usage(argv[0]);
+        return print_stats();
     }
 
     return usage(argv[0]);

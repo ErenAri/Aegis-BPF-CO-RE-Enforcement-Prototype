@@ -1,8 +1,9 @@
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
+#include <asm-generic/errno-base.h>
 
-#define PATH_MAX 256
 #define SIGKILL 9
 
 enum event_type {
@@ -21,6 +22,7 @@ struct exec_event {
     __u32 pid;
     __u32 ppid;
     __u64 start_time;
+    __u64 cgid;
     char comm[16];
 };
 
@@ -29,12 +31,22 @@ struct event {
     union {
         struct exec_event exec;
         struct {
+            __u32 ppid;
+            __u64 start_time;
+            __u64 parent_start_time;
             __u32 pid;
+            __u64 cgid;
             char comm[16];
-            char filename[PATH_MAX];
+            __u64 ino;
+            __u32 dev;
             char action[8];
         } block;
     };
+};
+
+struct inode_id {
+    __u64 ino;
+    __u32 dev;
 };
 
 struct {
@@ -45,18 +57,33 @@ struct {
 } process_tree SEC(".maps");
 
 struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u64);
+    __type(value, __u8);
+} allow_cgroup_map SEC(".maps");
+
+struct agent_config {
+    __u8 audit_only;
+};
+
+struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 1);
     __type(key, __u32);
-    __type(value, __u8);
-} cfg_map SEC(".maps");
+    __type(value, struct agent_config);
+} agent_config_map SEC(".maps");
+
+struct agent_meta {
+    __u32 layout_version;
+};
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, char[16]);
-    __type(value, __u8);
-} allowlist SEC(".maps");
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct agent_meta);
+} agent_meta_map SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_BLOOM_FILTER);
@@ -74,25 +101,40 @@ struct {
 } deny_exact SEC(".maps");
 
 struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct inode_id);
+    __type(value, __u8);
+} deny_inode_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u64);
+    __type(value, __u64);
+} deny_cgroup_stats SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct inode_id);
+    __type(value, __u64);
+} deny_inode_stats SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct {
+        __u64 blocks;
+        __u64 ringbuf_drops;
+    });
+} block_stats SEC(".maps");
+
+struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 24);
 } events SEC(".maps");
-
-static __always_inline __u64 hash_path(const char *buf)
-{
-    __u64 hash = 1469598103934665603ULL;
-
-#pragma unroll
-    for (int i = 0; i < PATH_MAX; i++) {
-        char c = buf[i];
-        if (!c)
-            break;
-        hash ^= (__u8)c;
-        hash *= 1099511628211ULL;
-    }
-
-    return hash;
-}
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int handle_execve(struct trace_event_raw_sys_enter *ctx)
@@ -101,6 +143,7 @@ int handle_execve(struct trace_event_raw_sys_enter *ctx)
     struct process_info info = {};
     struct process_info *existing;
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u64 cgid = bpf_get_current_cgroup_id();
     __u64 start_time = 0;
     __u64 parent_start_time = 0;
     __u32 ppid = 0;
@@ -138,70 +181,125 @@ int handle_execve(struct trace_event_raw_sys_enter *ctx)
     e->exec.pid = pid;
     e->exec.ppid = info.ppid;
     e->exec.start_time = info.start_time;
+    e->exec.cgid = cgid;
     bpf_get_current_comm(e->exec.comm, sizeof(e->exec.comm));
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_openat")
-int handle_openat(struct trace_event_raw_sys_enter *ctx)
+SEC("lsm/file_open")
+int BPF_PROG(handle_file_open, struct file *file)
 {
-    const char *filename = (const char *)ctx->args[1];
-    char buf[PATH_MAX];
-    __u64 hash;
-    struct event *e;
+    const struct inode *inode;
+    struct inode_id key = {};
+    __u8 *deny;
+    __u32 zero = 0;
+    struct agent_config *cfg;
+    __u8 audit = 0;
+    struct task_struct *task;
     __u32 pid;
-    __u32 uid;
-    __u32 euid = 0;
-    struct task_struct *task = bpf_get_current_task_btf();
-    __u32 key = 0;
-    __u8 *cfg;
-    bool enforce = false;
-    char comm[16] = {};
+    __u64 cgid;
+    struct {
+        __u64 blocks;
+        __u64 ringbuf_drops;
+    } *stats;
+    __u64 *cg_stat;
+    __u64 *ino_stat;
+    __u64 zero64 = 0;
 
-    uid = bpf_get_current_uid_gid();
-    if (task)
-        euid = BPF_CORE_READ(task, cred, euid.val);
-    if (uid == 0 || euid == 0)
-        return 0;
-    bpf_get_current_comm(comm, sizeof(comm));
-    if (!__builtin_memcmp(comm, "sudo", 5))
-        return 0;
-    if (!__builtin_memcmp(comm, "aegisbpf", 8))
-        return 0;
-    if (bpf_map_lookup_elem(&allowlist, comm))
-        return 0;
-    cfg = bpf_map_lookup_elem(&cfg_map, &key);
-    if (cfg && *cfg)
-        enforce = true;
-    if (bpf_probe_read_str(buf, sizeof(buf), filename) <= 0)
-        return 0;
-
-    hash = hash_path(buf);
-
-    if (bpf_map_peek_elem(&deny_bloom, &hash))
-        return 0;
-    if (!bpf_map_lookup_elem(&deny_exact, &hash))
-        return 0;
-
-    if (enforce)
-        bpf_send_signal(SIGKILL);
-
-    e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
-    if (!e)
+    if (!file)
         return 0;
 
     pid = bpf_get_current_pid_tgid() >> 32;
-    e->type = EVENT_BLOCK;
-    e->block.pid = pid;
-    bpf_get_current_comm(e->block.comm, sizeof(e->block.comm));
-    __builtin_memcpy(e->block.filename, buf, sizeof(e->block.filename));
-    if (enforce)
-        __builtin_memcpy(e->block.action, "SIGKILL", sizeof("SIGKILL"));
-    else
-        __builtin_memcpy(e->block.action, "AUDIT", sizeof("AUDIT"));
-    bpf_ringbuf_submit(e, 0);
+    task = bpf_get_current_task_btf();
+    cgid = bpf_get_current_cgroup_id();
+
+    cfg = bpf_map_lookup_elem(&agent_config_map, &zero);
+    if (cfg)
+        audit = cfg->audit_only & 1;
+
+    if (bpf_map_lookup_elem(&allow_cgroup_map, &cgid))
+        return 0;
+
+    inode = BPF_CORE_READ(file, f_inode);
+    if (!inode)
+        return 0;
+
+    key.ino = BPF_CORE_READ(inode, i_ino);
+    key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
+
+    deny = bpf_map_lookup_elem(&deny_inode_map, &key);
+    if (deny) {
+        struct event *e;
+        stats = bpf_map_lookup_elem(&block_stats, &zero);
+        if (stats)
+            __sync_fetch_and_add(&stats->blocks, 1);
+
+        cg_stat = bpf_map_lookup_elem(&deny_cgroup_stats, &cgid);
+        if (!cg_stat) {
+            bpf_map_update_elem(&deny_cgroup_stats, &cgid, &zero64, BPF_NOEXIST);
+            cg_stat = bpf_map_lookup_elem(&deny_cgroup_stats, &cgid);
+        }
+        if (cg_stat)
+            __sync_fetch_and_add(cg_stat, 1);
+
+        ino_stat = bpf_map_lookup_elem(&deny_inode_stats, &key);
+        if (!ino_stat) {
+            bpf_map_update_elem(&deny_inode_stats, &key, &zero64, BPF_NOEXIST);
+            ino_stat = bpf_map_lookup_elem(&deny_inode_stats, &key);
+        }
+        if (ino_stat)
+            __sync_fetch_and_add(ino_stat, 1);
+
+        if (!audit)
+            bpf_send_signal(SIGKILL);
+
+        e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+        if (e) {
+            e->type = EVENT_BLOCK;
+            e->block.pid = pid;
+            e->block.ppid = 0;
+            e->block.start_time = 0;
+            e->block.parent_start_time = 0;
+            e->block.cgid = cgid;
+            struct process_info *pi = bpf_map_lookup_elem(&process_tree, &e->block.pid);
+            if (!pi && task) {
+                struct process_info info = {};
+                info.pid = pid;
+                info.ppid = BPF_CORE_READ(task, real_parent, tgid);
+                info.start_time = BPF_CORE_READ(task, start_time);
+                info.parent_start_time = BPF_CORE_READ(task, real_parent, start_time);
+                bpf_map_update_elem(&process_tree, &pid, &info, BPF_ANY);
+                pi = bpf_map_lookup_elem(&process_tree, &pid);
+            }
+            if (pi) {
+                e->block.ppid = pi->ppid;
+                e->block.start_time = pi->start_time;
+                e->block.parent_start_time = pi->parent_start_time;
+            }
+            bpf_get_current_comm(e->block.comm, sizeof(e->block.comm));
+            e->block.ino = key.ino;
+            e->block.dev = key.dev;
+            if (audit)
+                __builtin_memcpy(e->block.action, "AUDIT", sizeof("AUDIT"));
+            else
+                __builtin_memcpy(e->block.action, "KILL", sizeof("KILL"));
+            bpf_ringbuf_submit(e, 0);
+        } else if (stats) {
+            __sync_fetch_and_add(&stats->ringbuf_drops, 1);
+        }
+
+        if (audit)
+            goto out_audit;
+        goto out_enforce;
+    }
+
     return 0;
+
+out_audit:
+    return 0;
+out_enforce:
+    return -EPERM;
 }
 
 SEC("tracepoint/sched/sched_process_fork")
