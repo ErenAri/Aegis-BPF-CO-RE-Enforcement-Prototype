@@ -4,21 +4,29 @@
 #include <cctype>
 #include <csignal>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <errno.h>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <limits.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-journal.h>
+#include <syslog.h>
+#endif
 
 static constexpr const char *kPinRoot = "/sys/fs/bpf/aegisbpf";
 static constexpr const char *kDenyInodePin = "/sys/fs/bpf/aegisbpf/deny_inode";
@@ -30,8 +38,12 @@ static constexpr const char *kDenyInodeStatsPin = "/sys/fs/bpf/aegisbpf/deny_ino
 static constexpr const char *kDenyPathStatsPin = "/sys/fs/bpf/aegisbpf/deny_path_stats";
 static constexpr const char *kAgentMetaPin = "/sys/fs/bpf/aegisbpf/agent_meta";
 static constexpr const char *kBpfObjPath = AEGIS_BPF_OBJ_PATH;
+static constexpr const char *kBpfObjInstallPath = "/usr/lib/aegisbpf/aegis.bpf.o";
 static constexpr const char *kDenyDbDir = "/var/lib/aegisbpf";
 static constexpr const char *kDenyDbPath = "/var/lib/aegisbpf/deny.db";
+static constexpr const char *kPolicyAppliedPath = "/var/lib/aegisbpf/policy.applied";
+static constexpr const char *kPolicyAppliedPrevPath = "/var/lib/aegisbpf/policy.applied.prev";
+static constexpr const char *kPolicyAppliedHashPath = "/var/lib/aegisbpf/policy.applied.sha256";
 static constexpr uint32_t kLayoutVersion = 1;
 static constexpr size_t kDenyPathMax = 256;
 
@@ -39,6 +51,14 @@ enum EventType : uint32_t {
     EVENT_EXEC = 1,
     EVENT_BLOCK = 2
 };
+
+enum class EventLogSink {
+    Stdout,
+    Journald,
+    StdoutAndJournald
+};
+
+static EventLogSink g_event_sink = EventLogSink::Stdout;
 
 struct exec_event {
     uint32_t pid;
@@ -180,6 +200,37 @@ static int ensure_db_dir()
     std::error_code ec;
     std::filesystem::create_directories(kDenyDbDir, ec);
     return ec ? -1 : 0;
+}
+
+static std::string resolve_bpf_obj_path()
+{
+    const char *env = std::getenv("AEGIS_BPF_OBJ");
+    if (env && *env)
+        return std::string(env);
+
+    auto exe_in_system_prefix = []() -> bool {
+        char buf[PATH_MAX];
+        ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+        if (len <= 0)
+            return false;
+        buf[len] = '\0';
+        std::string exe(buf);
+        return exe.rfind("/usr/", 0) == 0 || exe.rfind("/usr/local/", 0) == 0;
+    };
+
+    std::error_code ec;
+    if (exe_in_system_prefix()) {
+        if (std::filesystem::exists(kBpfObjInstallPath, ec))
+            return kBpfObjInstallPath;
+        if (std::filesystem::exists(kBpfObjPath, ec))
+            return kBpfObjPath;
+    } else {
+        if (std::filesystem::exists(kBpfObjPath, ec))
+            return kBpfObjPath;
+        if (std::filesystem::exists(kBpfObjInstallPath, ec))
+            return kBpfObjInstallPath;
+    }
+    return kBpfObjPath;
 }
 
 static std::string inode_to_string(const InodeId &id)
@@ -439,6 +490,289 @@ static bool parse_policy_file(const std::string &path, Policy &policy, PolicyIss
     return issues.errors.empty();
 }
 
+static std::string read_file_first_line(const std::string &path)
+{
+    std::ifstream in(path);
+    std::string line;
+    if (!in.is_open())
+        return {};
+    if (!std::getline(in, line))
+        return {};
+    return line;
+}
+
+static std::string find_kernel_config_value_in_file(const std::string &path, const std::string &key)
+{
+    std::ifstream in(path);
+    if (!in.is_open())
+        return {};
+    std::string line;
+    std::string prefix = key + "=";
+    while (std::getline(in, line)) {
+        if (line.rfind(prefix, 0) == 0)
+            return line.substr(prefix.size());
+    }
+    return {};
+}
+
+static std::string find_kernel_config_value_in_proc(const std::string &key)
+{
+    if (!std::filesystem::exists("/proc/config.gz"))
+        return {};
+    FILE *fp = popen("zcat /proc/config.gz 2>/dev/null", "r");
+    if (!fp)
+        return {};
+    std::string prefix = key + "=";
+    char buf[4096];
+    std::string value;
+    while (fgets(buf, sizeof(buf), fp)) {
+        std::string line(buf);
+        if (line.rfind(prefix, 0) == 0) {
+            value = line.substr(prefix.size());
+            value = trim(value);
+            break;
+        }
+    }
+    pclose(fp);
+    return value;
+}
+
+static std::string kernel_config_value(const std::string &key)
+{
+    struct utsname uts {};
+    if (uname(&uts) == 0) {
+        std::string path = std::string("/boot/config-") + uts.release;
+        std::string value = find_kernel_config_value_in_file(path, key);
+        if (!value.empty())
+            return value;
+    }
+    return find_kernel_config_value_in_proc(key);
+}
+
+static std::string join_list(const std::vector<std::string> &items)
+{
+    std::ostringstream oss;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i)
+            oss << ", ";
+        oss << items[i];
+    }
+    return oss.str();
+}
+
+struct Sha256State {
+    uint32_t state[8];
+    uint64_t bitlen;
+    uint8_t data[64];
+    size_t datalen;
+};
+
+static uint32_t sha256_rotr(uint32_t x, uint32_t n)
+{
+    return (x >> n) | (x << (32 - n));
+}
+
+static uint32_t sha256_ch(uint32_t x, uint32_t y, uint32_t z)
+{
+    return (x & y) ^ (~x & z);
+}
+
+static uint32_t sha256_maj(uint32_t x, uint32_t y, uint32_t z)
+{
+    return (x & y) ^ (x & z) ^ (y & z);
+}
+
+static uint32_t sha256_ep0(uint32_t x)
+{
+    return sha256_rotr(x, 2) ^ sha256_rotr(x, 13) ^ sha256_rotr(x, 22);
+}
+
+static uint32_t sha256_ep1(uint32_t x)
+{
+    return sha256_rotr(x, 6) ^ sha256_rotr(x, 11) ^ sha256_rotr(x, 25);
+}
+
+static uint32_t sha256_sig0(uint32_t x)
+{
+    return sha256_rotr(x, 7) ^ sha256_rotr(x, 18) ^ (x >> 3);
+}
+
+static uint32_t sha256_sig1(uint32_t x)
+{
+    return sha256_rotr(x, 17) ^ sha256_rotr(x, 19) ^ (x >> 10);
+}
+
+static const uint32_t kSha256K[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+};
+
+static void sha256_transform(Sha256State &ctx, const uint8_t data[64])
+{
+    uint32_t m[64];
+    for (size_t i = 0; i < 16; ++i) {
+        m[i] = (static_cast<uint32_t>(data[i * 4]) << 24) |
+               (static_cast<uint32_t>(data[i * 4 + 1]) << 16) |
+               (static_cast<uint32_t>(data[i * 4 + 2]) << 8) |
+               (static_cast<uint32_t>(data[i * 4 + 3]));
+    }
+    for (size_t i = 16; i < 64; ++i)
+        m[i] = sha256_sig1(m[i - 2]) + m[i - 7] + sha256_sig0(m[i - 15]) + m[i - 16];
+
+    uint32_t a = ctx.state[0];
+    uint32_t b = ctx.state[1];
+    uint32_t c = ctx.state[2];
+    uint32_t d = ctx.state[3];
+    uint32_t e = ctx.state[4];
+    uint32_t f = ctx.state[5];
+    uint32_t g = ctx.state[6];
+    uint32_t h = ctx.state[7];
+
+    for (size_t i = 0; i < 64; ++i) {
+        uint32_t t1 = h + sha256_ep1(e) + sha256_ch(e, f, g) + kSha256K[i] + m[i];
+        uint32_t t2 = sha256_ep0(a) + sha256_maj(a, b, c);
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2;
+    }
+
+    ctx.state[0] += a;
+    ctx.state[1] += b;
+    ctx.state[2] += c;
+    ctx.state[3] += d;
+    ctx.state[4] += e;
+    ctx.state[5] += f;
+    ctx.state[6] += g;
+    ctx.state[7] += h;
+}
+
+static void sha256_init(Sha256State &ctx)
+{
+    ctx.datalen = 0;
+    ctx.bitlen = 0;
+    ctx.state[0] = 0x6a09e667;
+    ctx.state[1] = 0xbb67ae85;
+    ctx.state[2] = 0x3c6ef372;
+    ctx.state[3] = 0xa54ff53a;
+    ctx.state[4] = 0x510e527f;
+    ctx.state[5] = 0x9b05688c;
+    ctx.state[6] = 0x1f83d9ab;
+    ctx.state[7] = 0x5be0cd19;
+}
+
+static void sha256_update(Sha256State &ctx, const uint8_t *data, size_t len)
+{
+    for (size_t i = 0; i < len; ++i) {
+        ctx.data[ctx.datalen] = data[i];
+        ctx.datalen++;
+        if (ctx.datalen == 64) {
+            sha256_transform(ctx, ctx.data);
+            ctx.bitlen += 512;
+            ctx.datalen = 0;
+        }
+    }
+}
+
+static void sha256_final(Sha256State &ctx, uint8_t hash[32])
+{
+    size_t i = ctx.datalen;
+    if (ctx.datalen < 56) {
+        ctx.data[i++] = 0x80;
+        while (i < 56)
+            ctx.data[i++] = 0x00;
+    } else {
+        ctx.data[i++] = 0x80;
+        while (i < 64)
+            ctx.data[i++] = 0x00;
+        sha256_transform(ctx, ctx.data);
+        std::memset(ctx.data, 0, 56);
+    }
+
+    ctx.bitlen += ctx.datalen * 8;
+    ctx.data[63] = static_cast<uint8_t>(ctx.bitlen);
+    ctx.data[62] = static_cast<uint8_t>(ctx.bitlen >> 8);
+    ctx.data[61] = static_cast<uint8_t>(ctx.bitlen >> 16);
+    ctx.data[60] = static_cast<uint8_t>(ctx.bitlen >> 24);
+    ctx.data[59] = static_cast<uint8_t>(ctx.bitlen >> 32);
+    ctx.data[58] = static_cast<uint8_t>(ctx.bitlen >> 40);
+    ctx.data[57] = static_cast<uint8_t>(ctx.bitlen >> 48);
+    ctx.data[56] = static_cast<uint8_t>(ctx.bitlen >> 56);
+    sha256_transform(ctx, ctx.data);
+
+    for (i = 0; i < 4; ++i) {
+        hash[i] = (ctx.state[0] >> (24 - i * 8)) & 0xff;
+        hash[i + 4] = (ctx.state[1] >> (24 - i * 8)) & 0xff;
+        hash[i + 8] = (ctx.state[2] >> (24 - i * 8)) & 0xff;
+        hash[i + 12] = (ctx.state[3] >> (24 - i * 8)) & 0xff;
+        hash[i + 16] = (ctx.state[4] >> (24 - i * 8)) & 0xff;
+        hash[i + 20] = (ctx.state[5] >> (24 - i * 8)) & 0xff;
+        hash[i + 24] = (ctx.state[6] >> (24 - i * 8)) & 0xff;
+        hash[i + 28] = (ctx.state[7] >> (24 - i * 8)) & 0xff;
+    }
+}
+
+static bool sha256_file_hex(const std::string &path, std::string &out_hex)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open())
+        return false;
+    Sha256State ctx {};
+    sha256_init(ctx);
+    char buf[4096];
+    while (in.good()) {
+        in.read(buf, sizeof(buf));
+        std::streamsize got = in.gcount();
+        if (got > 0)
+            sha256_update(ctx, reinterpret_cast<const uint8_t *>(buf), static_cast<size_t>(got));
+    }
+    if (!in.eof() && in.fail())
+        return false;
+    uint8_t hash[32];
+    sha256_final(ctx, hash);
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0');
+    for (uint8_t b : hash)
+        oss << std::setw(2) << static_cast<int>(b);
+    out_hex = oss.str();
+    return true;
+}
+
+static bool parse_sha256_token(const std::string &text, std::string &hex)
+{
+    std::istringstream iss(text);
+    std::string token;
+    if (!(iss >> token))
+        return false;
+    if (token.size() != 64)
+        return false;
+    for (char c : token) {
+        if (!std::isxdigit(static_cast<unsigned char>(c)))
+            return false;
+    }
+    std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    hex = token;
+    return true;
+}
+
+static bool path_exists(const char *path, std::error_code &ec)
+{
+    ec.clear();
+    return std::filesystem::exists(path, ec);
+}
+
 static size_t map_entry_count(bpf_map *map)
 {
     if (!map)
@@ -515,6 +849,61 @@ static int write_deny_db(const DenyEntries &entries)
     return 0;
 }
 
+static int record_applied_policy(const std::string &path, const std::string &hash)
+{
+    if (ensure_db_dir())
+        return -1;
+
+    std::error_code ec;
+    if (std::filesystem::exists(kPolicyAppliedPath, ec)) {
+        std::filesystem::copy_file(kPolicyAppliedPath, kPolicyAppliedPrevPath,
+                                   std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec)
+            return -1;
+    }
+
+    std::ifstream in(path);
+    if (!in.is_open())
+        return -1;
+    std::ofstream out(kPolicyAppliedPath, std::ios::trunc);
+    if (!out.is_open())
+        return -1;
+    out << in.rdbuf();
+    if (!out.good())
+        return -1;
+
+    if (!hash.empty()) {
+        std::ofstream hout(kPolicyAppliedHashPath, std::ios::trunc);
+        if (!hout.is_open())
+            return -1;
+        hout << hash << "\n";
+    } else {
+        std::error_code rm_ec;
+        std::filesystem::remove(kPolicyAppliedHashPath, rm_ec);
+        if (rm_ec)
+            return -1;
+    }
+    return 0;
+}
+
+static bool read_sha256_file(const std::string &path, std::string &hash)
+{
+    std::ifstream in(path);
+    if (!in.is_open())
+        return false;
+    std::string line;
+    if (!std::getline(in, line))
+        return false;
+    return parse_sha256_token(line, hash);
+}
+
+static bool verify_policy_hash(const std::string &path, const std::string &expected, std::string &computed)
+{
+    if (!sha256_file_hex(path, computed))
+        return false;
+    return computed == expected;
+}
+
 static int reuse_pinned_map(bpf_map *map, const char *path, bool &reused)
 {
     int fd = bpf_obj_get(path);
@@ -555,7 +944,8 @@ static int attach_prog(bpf_program *prog, BpfState &state)
 
 static int load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
 {
-    state.obj = bpf_object__open_file(kBpfObjPath, nullptr);
+    std::string obj_path = resolve_bpf_obj_path();
+    state.obj = bpf_object__open_file(obj_path.c_str(), nullptr);
     if (!state.obj)
         return -errno;
 
@@ -810,15 +1200,135 @@ static std::string json_escape(const std::string &in)
     return out;
 }
 
+static std::string build_exec_id(uint32_t pid, uint64_t start_time)
+{
+    if (pid == 0 || start_time == 0)
+        return {};
+    return std::to_string(start_time) + "-" + std::to_string(pid);
+}
+
+static std::string prometheus_escape_label(const std::string &in)
+{
+    std::string out;
+    out.reserve(in.size() + 4);
+    for (char c : in) {
+        switch (c) {
+        case '\\':
+            out += "\\\\";
+            break;
+        case '"':
+            out += "\\\"";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        default:
+            out += c;
+            break;
+        }
+    }
+    return out;
+}
+
+static bool sink_wants_stdout(EventLogSink sink)
+{
+    return sink == EventLogSink::Stdout || sink == EventLogSink::StdoutAndJournald;
+}
+
+static bool sink_wants_journald(EventLogSink sink)
+{
+    return sink == EventLogSink::Journald || sink == EventLogSink::StdoutAndJournald;
+}
+
+static bool set_event_log_sink(const std::string &value)
+{
+    if (value == "stdout") {
+        g_event_sink = EventLogSink::Stdout;
+        return true;
+    }
+#ifdef HAVE_SYSTEMD
+    if (value == "journal" || value == "journald") {
+        g_event_sink = EventLogSink::Journald;
+        return true;
+    }
+    if (value == "both") {
+        g_event_sink = EventLogSink::StdoutAndJournald;
+        return true;
+    }
+#else
+    if (value == "journal" || value == "journald" || value == "both") {
+        std::cerr << "Journald logging requested but libsystemd support is unavailable at build time."
+                  << std::endl;
+        return false;
+    }
+#endif
+    return false;
+}
+
+#ifdef HAVE_SYSTEMD
+static void journal_report_error(int rc)
+{
+    static bool reported = false;
+    if (rc >= 0 || reported)
+        return;
+    reported = true;
+    std::cerr << "journald logging failed: " << std::strerror(-rc) << std::endl;
+}
+
+static void journal_send_exec(const exec_event &ev, const std::string &payload, const std::string &cgpath,
+                              const std::string &comm, const std::string &exec_id)
+{
+    int rc = sd_journal_send("MESSAGE=%s", payload.c_str(), "SYSLOG_IDENTIFIER=aegisbpf", "AEGIS_TYPE=exec",
+                             "AEGIS_PID=%u", ev.pid, "AEGIS_PPID=%u", ev.ppid, "AEGIS_START_TIME=%llu",
+                             static_cast<unsigned long long>(ev.start_time), "AEGIS_EXEC_ID=%s", exec_id.c_str(),
+                             "AEGIS_CGID=%llu",
+                             static_cast<unsigned long long>(ev.cgid), "AEGIS_CGROUP_PATH=%s", cgpath.c_str(),
+                             "AEGIS_COMM=%s", comm.c_str(), "PRIORITY=%i", LOG_INFO,
+                             static_cast<const char *>(nullptr));
+    journal_report_error(rc);
+}
+
+static void journal_send_block(const block_event &ev, const std::string &payload, const std::string &cgpath,
+                               const std::string &path, const std::string &resolved_path, const std::string &action,
+                               const std::string &comm, const std::string &exec_id,
+                               const std::string &parent_exec_id)
+{
+    int priority = (action == "AUDIT") ? LOG_INFO : LOG_WARNING;
+    int rc =
+        sd_journal_send("MESSAGE=%s", payload.c_str(), "SYSLOG_IDENTIFIER=aegisbpf", "AEGIS_TYPE=block",
+                        "AEGIS_PID=%u", ev.pid, "AEGIS_PPID=%u", ev.ppid, "AEGIS_START_TIME=%llu",
+                        static_cast<unsigned long long>(ev.start_time), "AEGIS_EXEC_ID=%s", exec_id.c_str(),
+                        "AEGIS_PARENT_START_TIME=%llu", static_cast<unsigned long long>(ev.parent_start_time),
+                        "AEGIS_PARENT_EXEC_ID=%s", parent_exec_id.c_str(), "AEGIS_CGID=%llu",
+                        static_cast<unsigned long long>(ev.cgid), "AEGIS_CGROUP_PATH=%s", cgpath.c_str(),
+                        "AEGIS_INO=%llu", static_cast<unsigned long long>(ev.ino), "AEGIS_DEV=%u", ev.dev,
+                        "AEGIS_PATH=%s", path.c_str(), "AEGIS_RESOLVED_PATH=%s", resolved_path.c_str(),
+                        "AEGIS_ACTION=%s", action.c_str(), "AEGIS_COMM=%s", comm.c_str(), "PRIORITY=%i", priority,
+                        static_cast<const char *>(nullptr));
+    journal_report_error(rc);
+}
+#endif
+
 static void print_exec_event(const exec_event &ev)
 {
     std::ostringstream oss;
     std::string cgpath = resolve_cgroup_path(ev.cgid);
+    std::string comm = to_string(ev.comm, sizeof(ev.comm));
+    std::string exec_id = build_exec_id(ev.pid, ev.start_time);
     oss << "{\"type\":\"exec\",\"pid\":" << ev.pid << ",\"ppid\":" << ev.ppid
-        << ",\"start_time\":" << ev.start_time << ",\"cgid\":" << ev.cgid
+        << ",\"start_time\":" << ev.start_time;
+    if (!exec_id.empty())
+        oss << ",\"exec_id\":\"" << json_escape(exec_id) << "\"";
+    oss << ",\"cgid\":" << ev.cgid
         << ",\"cgroup_path\":\"" << json_escape(cgpath) << "\""
-        << ",\"comm\":\"" << json_escape(to_string(ev.comm, sizeof(ev.comm))) << "\"}";
-    std::cout << oss.str() << std::endl;
+        << ",\"comm\":\"" << json_escape(comm) << "\"}";
+    std::string payload = oss.str();
+    if (sink_wants_stdout(g_event_sink))
+        std::cout << payload << std::endl;
+#ifdef HAVE_SYSTEMD
+    if (sink_wants_journald(g_event_sink))
+        journal_send_exec(ev, payload, cgpath, comm, exec_id);
+#endif
 }
 
 static void print_block_event(const block_event &ev)
@@ -827,17 +1337,31 @@ static void print_block_event(const block_event &ev)
     std::string cgpath = resolve_cgroup_path(ev.cgid);
     std::string path = to_string(ev.path, sizeof(ev.path));
     std::string resolved_path = resolve_relative_path(ev.pid, ev.start_time, path);
+    std::string action = to_string(ev.action, sizeof(ev.action));
+    std::string comm = to_string(ev.comm, sizeof(ev.comm));
+    std::string exec_id = build_exec_id(ev.pid, ev.start_time);
+    std::string parent_exec_id = build_exec_id(ev.ppid, ev.parent_start_time);
     oss << "{\"type\":\"block\",\"pid\":" << ev.pid << ",\"ppid\":" << ev.ppid
-        << ",\"start_time\":" << ev.start_time << ",\"parent_start_time\":" << ev.parent_start_time
-        << ",\"cgid\":" << ev.cgid << ",\"cgroup_path\":\"" << json_escape(cgpath) << "\"";
+        << ",\"start_time\":" << ev.start_time;
+    if (!exec_id.empty())
+        oss << ",\"exec_id\":\"" << json_escape(exec_id) << "\"";
+    oss << ",\"parent_start_time\":" << ev.parent_start_time;
+    if (!parent_exec_id.empty())
+        oss << ",\"parent_exec_id\":\"" << json_escape(parent_exec_id) << "\"";
+    oss << ",\"cgid\":" << ev.cgid << ",\"cgroup_path\":\"" << json_escape(cgpath) << "\"";
     if (!path.empty())
         oss << ",\"path\":\"" << json_escape(path) << "\"";
     if (!resolved_path.empty() && resolved_path != path)
         oss << ",\"resolved_path\":\"" << json_escape(resolved_path) << "\"";
-    oss << ",\"ino\":" << ev.ino << ",\"dev\":" << ev.dev << ",\"action\":\""
-        << json_escape(to_string(ev.action, sizeof(ev.action))) << "\",\"comm\":\""
-        << json_escape(to_string(ev.comm, sizeof(ev.comm))) << "\"}";
-    std::cout << oss.str() << std::endl;
+    oss << ",\"ino\":" << ev.ino << ",\"dev\":" << ev.dev << ",\"action\":\"" << json_escape(action)
+        << "\",\"comm\":\"" << json_escape(comm) << "\"}";
+    std::string payload = oss.str();
+    if (sink_wants_stdout(g_event_sink))
+        std::cout << payload << std::endl;
+#ifdef HAVE_SYSTEMD
+    if (sink_wants_journald(g_event_sink))
+        journal_send_block(ev, payload, cgpath, path, resolved_path, action, comm, exec_id, parent_exec_id);
+#endif
 }
 
 static int handle_event(void *, void *data, size_t)
@@ -1348,6 +1872,9 @@ static int block_clear()
     std::remove(kDenyPathStatsPin);
     std::remove(kAgentMetaPin);
     std::filesystem::remove(kDenyDbPath);
+    std::filesystem::remove(kPolicyAppliedPath);
+    std::filesystem::remove(kPolicyAppliedPrevPath);
+    std::filesystem::remove(kPolicyAppliedHashPath);
 
     if (bump_memlock_rlimit()) {
         std::cerr << "Failed to raise memlock rlimit: " << std::strerror(errno) << std::endl;
@@ -1423,6 +1950,115 @@ static int allow_list()
     return 0;
 }
 
+static int health()
+{
+    bool ok = true;
+    std::error_code ec;
+    bool cgroup_ok = path_exists("/sys/fs/cgroup/cgroup.controllers", ec);
+    bool bpffs_ok = path_exists("/sys/fs/bpf", ec);
+    bool btf_ok = path_exists("/sys/kernel/btf/vmlinux", ec);
+    std::string obj_path = resolve_bpf_obj_path();
+    bool obj_ok = path_exists(obj_path.c_str(), ec);
+
+    if (!cgroup_ok || !bpffs_ok || !btf_ok || !obj_ok)
+        ok = false;
+
+    bool is_root = geteuid() == 0;
+    std::cout << "euid: " << geteuid() << "\n";
+    std::cout << "cgroup_v2: " << (cgroup_ok ? "ok" : "missing") << "\n";
+    std::cout << "bpffs: " << (bpffs_ok ? "ok" : "missing") << "\n";
+    std::cout << "btf: " << (btf_ok ? "ok" : "missing") << "\n";
+    std::cout << "bpf_obj_path: " << obj_path << (obj_ok ? "" : " (missing)") << "\n";
+
+    bool lsm_enabled = kernel_bpf_lsm_enabled();
+    std::cout << "bpf_lsm_enabled: " << (lsm_enabled ? "yes" : "no") << "\n";
+
+    std::string lsm_list = read_file_first_line("/sys/kernel/security/lsm");
+    if (!lsm_list.empty())
+        std::cout << "lsm_list: " << lsm_list << "\n";
+
+    struct KernelConfigCheck {
+        const char *key;
+        const char *label;
+    };
+    const KernelConfigCheck config_checks[] = {
+        {"CONFIG_BPF", "kernel_config_bpf"},
+        {"CONFIG_BPF_SYSCALL", "kernel_config_bpf_syscall"},
+        {"CONFIG_BPF_JIT", "kernel_config_bpf_jit"},
+        {"CONFIG_BPF_LSM", "kernel_config_bpf_lsm"},
+        {"CONFIG_CGROUPS", "kernel_config_cgroups"},
+        {"CONFIG_CGROUP_BPF", "kernel_config_cgroup_bpf"},
+    };
+    for (const auto &check : config_checks) {
+        std::string value = kernel_config_value(check.key);
+        if (value.empty())
+            value = "unknown";
+        std::cout << check.label << ": " << value << "\n";
+    }
+
+    struct PinInfo {
+        const char *name;
+        const char *path;
+    };
+    const PinInfo pins[] = {
+        {"deny_inode", kDenyInodePin},
+        {"deny_path", kDenyPathPin},
+        {"allow_cgroup", kAllowCgroupPin},
+        {"block_stats", kBlockStatsPin},
+        {"deny_cgroup_stats", kDenyCgroupStatsPin},
+        {"deny_inode_stats", kDenyInodeStatsPin},
+        {"deny_path_stats", kDenyPathStatsPin},
+        {"agent_meta", kAgentMetaPin},
+    };
+    if (is_root) {
+        std::vector<std::string> present;
+        std::vector<std::string> missing;
+        std::vector<std::string> unreadable;
+        for (const auto &pin : pins) {
+            bool exists = path_exists(pin.path, ec);
+            if (ec) {
+                unreadable.emplace_back(pin.name);
+            } else if (exists) {
+                present.emplace_back(pin.name);
+            } else {
+                missing.emplace_back(pin.name);
+            }
+        }
+        if (!present.empty())
+            std::cout << "pins_present: " << join_list(present) << "\n";
+        if (!missing.empty())
+            std::cout << "pins_missing: " << join_list(missing) << "\n";
+        if (!unreadable.empty())
+            std::cout << "pins_unreadable: " << join_list(unreadable) << "\n";
+
+        if (path_exists(kAgentMetaPin, ec)) {
+            int fd = bpf_obj_get(kAgentMetaPin);
+            if (fd < 0) {
+                std::cout << "layout_version: unreadable (" << std::strerror(errno) << ")\n";
+            } else {
+                uint32_t key = 0;
+                AgentMeta meta {};
+                if (bpf_map_lookup_elem(fd, &key, &meta) == 0) {
+                    if (meta.layout_version == kLayoutVersion) {
+                        std::cout << "layout_version: ok (" << meta.layout_version << ")\n";
+                    } else {
+                        std::cout << "layout_version: mismatch (found " << meta.layout_version << ", expected "
+                                  << kLayoutVersion << ")\n";
+                    }
+                } else {
+                    std::cout << "layout_version: unavailable (" << std::strerror(errno) << ")\n";
+                }
+                close(fd);
+            }
+        }
+    } else {
+        std::cout << "pins_present: skipped (requires root)" << "\n";
+        std::cout << "layout_version: skipped (requires root)" << "\n";
+    }
+
+    return ok ? 0 : 1;
+}
+
 static int reset_policy_maps(BpfState &state)
 {
     if (clear_map_entries(state.deny_inode)) {
@@ -1466,7 +2102,7 @@ static int policy_lint(const std::string &path)
     return ok ? 0 : 1;
 }
 
-static int policy_apply(const std::string &path, bool reset)
+static int apply_policy_internal(const std::string &path, const std::string &computed_hash, bool reset, bool record)
 {
     Policy policy {};
     PolicyIssues issues;
@@ -1528,8 +2164,75 @@ static int policy_apply(const std::string &path, bool reset)
     }
 
     write_deny_db(entries);
+    if (record) {
+        if (record_applied_policy(path, computed_hash)) {
+            std::cerr << "Failed to record applied policy at " << kPolicyAppliedPath << std::endl;
+            cleanup_bpf(state);
+            return 1;
+        }
+    }
     cleanup_bpf(state);
     return 0;
+}
+
+static int policy_apply(const std::string &path, bool reset, const std::string &cli_hash,
+                        const std::string &cli_hash_file, bool rollback_on_failure)
+{
+    std::string expected_hash = cli_hash;
+    std::string hash_file = cli_hash_file;
+
+    if (expected_hash.empty()) {
+        const char *env = std::getenv("AEGIS_POLICY_SHA256");
+        if (env && *env)
+            expected_hash = env;
+    }
+    if (hash_file.empty()) {
+        const char *env = std::getenv("AEGIS_POLICY_SHA256_FILE");
+        if (env && *env)
+            hash_file = env;
+    }
+
+    if (!expected_hash.empty() && !hash_file.empty()) {
+        std::cerr << "Provide either --sha256 or --sha256-file (not both)" << std::endl;
+        return 1;
+    }
+
+    if (!hash_file.empty()) {
+        if (!read_sha256_file(hash_file, expected_hash)) {
+            std::cerr << "Failed to read sha256 file " << hash_file << std::endl;
+            return 1;
+        }
+    }
+
+    if (!expected_hash.empty()) {
+        if (!parse_sha256_token(expected_hash, expected_hash)) {
+            std::cerr << "Invalid sha256 value format" << std::endl;
+            return 1;
+        }
+    }
+
+    std::string computed_hash;
+    if (!expected_hash.empty()) {
+        if (!verify_policy_hash(path, expected_hash, computed_hash)) {
+            std::cerr << "Policy sha256 mismatch" << std::endl;
+            return 1;
+        }
+    } else if (!sha256_file_hex(path, computed_hash)) {
+        std::cerr << "Failed to compute policy sha256; continuing without hash" << std::endl;
+        computed_hash.clear();
+    }
+
+    int rc = apply_policy_internal(path, computed_hash, reset, true);
+    if (rc && rollback_on_failure) {
+        std::error_code ec;
+        if (std::filesystem::exists(kPolicyAppliedPath, ec)) {
+            std::cerr << "Apply failed; rolling back to last applied policy" << std::endl;
+            int rollback_rc = apply_policy_internal(kPolicyAppliedPath, std::string(), true, false);
+            if (rollback_rc)
+                std::cerr << "Rollback failed; maps may be inconsistent" << std::endl;
+        }
+    }
+    return rc;
 }
 
 static int write_policy_file(const std::string &path, std::vector<std::string> deny_paths,
@@ -1604,6 +2307,129 @@ static int policy_export(const std::string &path)
     int rc = write_policy_file(path, deny_paths, deny_inodes, allow_entries);
     cleanup_bpf(state);
     return rc;
+}
+
+static int policy_show()
+{
+    std::ifstream in(kPolicyAppliedPath);
+    if (!in.is_open()) {
+        std::cerr << "No applied policy found at " << kPolicyAppliedPath << std::endl;
+        return 1;
+    }
+    std::string hash = read_file_first_line(kPolicyAppliedHashPath);
+    if (!hash.empty())
+        std::cout << "# applied_sha256: " << hash << "\n";
+    std::cout << in.rdbuf();
+    return 0;
+}
+
+static int policy_rollback()
+{
+    if (!std::filesystem::exists(kPolicyAppliedPrevPath)) {
+        std::cerr << "No rollback policy found at " << kPolicyAppliedPrevPath << std::endl;
+        return 1;
+    }
+    std::string computed_hash;
+    sha256_file_hex(kPolicyAppliedPrevPath, computed_hash);
+    return apply_policy_internal(kPolicyAppliedPrevPath, computed_hash, true, true);
+}
+
+static int print_metrics(const std::string &out_path)
+{
+    BpfState state;
+    int err = load_bpf(true, false, state);
+    if (err) {
+        std::cerr << "Failed to load BPF object: " << std::strerror(-err) << std::endl;
+        return 1;
+    }
+
+    BlockStats stats {};
+    if (read_block_stats_map(state.block_stats, stats)) {
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    std::vector<std::pair<uint64_t, uint64_t>> cgroup_blocks;
+    if (read_cgroup_block_counts(state.deny_cgroup_stats, cgroup_blocks)) {
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    std::vector<std::pair<InodeId, uint64_t>> inode_blocks;
+    if (read_inode_block_counts(state.deny_inode_stats, inode_blocks)) {
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    std::vector<std::pair<std::string, uint64_t>> path_blocks;
+    if (read_path_block_counts(state.deny_path_stats, path_blocks)) {
+        cleanup_bpf(state);
+        return 1;
+    }
+
+    size_t deny_sz = map_entry_count(state.deny_inode);
+    size_t deny_path_sz = map_entry_count(state.deny_path);
+    size_t allow_sz = map_entry_count(state.allow_cgroup);
+
+    std::ostringstream oss;
+    oss << "# HELP aegisbpf_blocks_total Total number of block events.\n";
+    oss << "# TYPE aegisbpf_blocks_total counter\n";
+    oss << "aegisbpf_blocks_total " << stats.blocks << "\n";
+    oss << "# HELP aegisbpf_ringbuf_drops_total Total ringbuf drops.\n";
+    oss << "# TYPE aegisbpf_ringbuf_drops_total counter\n";
+    oss << "aegisbpf_ringbuf_drops_total " << stats.ringbuf_drops << "\n";
+    oss << "# HELP aegisbpf_deny_inode_entries Number of deny inode entries.\n";
+    oss << "# TYPE aegisbpf_deny_inode_entries gauge\n";
+    oss << "aegisbpf_deny_inode_entries " << deny_sz << "\n";
+    oss << "# HELP aegisbpf_deny_path_entries Number of deny path entries.\n";
+    oss << "# TYPE aegisbpf_deny_path_entries gauge\n";
+    oss << "aegisbpf_deny_path_entries " << deny_path_sz << "\n";
+    oss << "# HELP aegisbpf_allow_cgroup_entries Number of allow cgroup entries.\n";
+    oss << "# TYPE aegisbpf_allow_cgroup_entries gauge\n";
+    oss << "aegisbpf_allow_cgroup_entries " << allow_sz << "\n";
+
+    if (!cgroup_blocks.empty()) {
+        oss << "# HELP aegisbpf_blocks_by_cgroup_total Block events by cgroup.\n";
+        oss << "# TYPE aegisbpf_blocks_by_cgroup_total counter\n";
+        for (const auto &kv : cgroup_blocks) {
+            std::string path = resolve_cgroup_path(kv.first);
+            oss << "aegisbpf_blocks_by_cgroup_total{cgid=\"" << kv.first << "\",cgroup_path=\""
+                << prometheus_escape_label(path) << "\"} " << kv.second << "\n";
+        }
+    }
+    if (!inode_blocks.empty()) {
+        oss << "# HELP aegisbpf_blocks_by_inode_total Block events by inode.\n";
+        oss << "# TYPE aegisbpf_blocks_by_inode_total counter\n";
+        for (const auto &kv : inode_blocks) {
+            oss << "aegisbpf_blocks_by_inode_total{dev=\"" << kv.first.dev << "\",ino=\"" << kv.first.ino << "\"} "
+                << kv.second << "\n";
+        }
+    }
+    if (!path_blocks.empty()) {
+        oss << "# HELP aegisbpf_blocks_by_path_total Block events by path.\n";
+        oss << "# TYPE aegisbpf_blocks_by_path_total counter\n";
+        for (const auto &kv : path_blocks) {
+            if (kv.first.empty())
+                continue;
+            oss << "aegisbpf_blocks_by_path_total{path=\"" << prometheus_escape_label(kv.first) << "\"} "
+                << kv.second << "\n";
+        }
+    }
+
+    if (out_path.empty() || out_path == "-") {
+        std::cout << oss.str();
+    } else {
+        std::ofstream out(out_path, std::ios::trunc);
+        if (!out.is_open()) {
+            std::cerr << "Failed to write metrics to '" << out_path << "'" << std::endl;
+            cleanup_bpf(state);
+            return 1;
+        }
+        out << oss.str();
+    }
+
+    cleanup_bpf(state);
+    return 0;
 }
 
 static int print_stats()
@@ -1685,11 +2511,14 @@ static int print_stats()
 static int usage(const char *prog)
 {
     std::cerr << "Usage: " << prog
-              << " run [--audit|--enforce]"
+              << " run [--audit|--enforce] [--log=stdout|journald|both]"
               << " | block {add|del|list|clear} [path]"
               << " | allow {add|del} <cgroup_path> | allow list"
-              << " | policy {lint|apply|export} <file> [--reset]"
-              << " | stats" << std::endl;
+              << " | policy {lint|apply|export} <file> [--reset] [--sha256 <hex>|--sha256-file <path>] [--no-rollback]"
+              << " | policy {show|rollback}"
+              << " | stats"
+              << " | metrics [--out <path>]"
+              << " | health" << std::endl;
     return 1;
 }
 
@@ -1707,6 +2536,16 @@ int main(int argc, char **argv)
                 audit_only = true;
             } else if (arg == "--enforce" || arg == "--mode=enforce") {
                 audit_only = false;
+            } else if (arg.rfind("--log=", 0) == 0) {
+                std::string value = arg.substr(std::strlen("--log="));
+                if (!set_event_log_sink(value))
+                    return usage(argv[0]);
+            } else if (arg == "--log") {
+                if (i + 1 >= argc)
+                    return usage(argv[0]);
+                std::string value = argv[++i];
+                if (!set_event_log_sink(value))
+                    return usage(argv[0]);
             } else {
                 return usage(argv[0]);
             }
@@ -1754,8 +2593,6 @@ int main(int argc, char **argv)
         }
     }
     if (cmd == "policy") {
-        if (argc < 4)
-            return usage(argv[0]);
         std::string sub = argv[2];
         if (sub == "lint") {
             if (argc != 4)
@@ -1763,23 +2600,67 @@ int main(int argc, char **argv)
             return policy_lint(argv[3]);
         }
         if (sub == "apply") {
+            if (argc < 4)
+                return usage(argv[0]);
             bool reset = false;
+            bool rollback_on_failure = true;
+            std::string sha256;
+            std::string sha256_file;
             for (int i = 4; i < argc; ++i) {
                 std::string arg = argv[i];
                 if (arg == "--reset") {
                     reset = true;
+                } else if (arg == "--no-rollback") {
+                    rollback_on_failure = false;
+                } else if (arg == "--sha256") {
+                    if (i + 1 >= argc)
+                        return usage(argv[0]);
+                    sha256 = argv[++i];
+                } else if (arg == "--sha256-file") {
+                    if (i + 1 >= argc)
+                        return usage(argv[0]);
+                    sha256_file = argv[++i];
                 } else {
                     return usage(argv[0]);
                 }
             }
-            return policy_apply(argv[3], reset);
+            return policy_apply(argv[3], reset, sha256, sha256_file, rollback_on_failure);
         }
         if (sub == "export") {
             if (argc != 4)
                 return usage(argv[0]);
             return policy_export(argv[3]);
         }
+        if (sub == "show") {
+            if (argc != 3)
+                return usage(argv[0]);
+            return policy_show();
+        }
+        if (sub == "rollback") {
+            if (argc != 3)
+                return usage(argv[0]);
+            return policy_rollback();
+        }
         return usage(argv[0]);
+    }
+    if (cmd == "health") {
+        if (argc > 2)
+            return usage(argv[0]);
+        return health();
+    }
+    if (cmd == "metrics") {
+        std::string out_path;
+        for (int i = 2; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--out") {
+                if (i + 1 >= argc)
+                    return usage(argv[0]);
+                out_path = argv[++i];
+            } else {
+                return usage(argv[0]);
+            }
+        }
+        return print_metrics(out_path);
     }
     if (cmd == "stats") {
         if (argc > 2)

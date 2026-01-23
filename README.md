@@ -8,11 +8,15 @@ eBPF LSM agent that enforces inode-based deny rules in `lsm/file_open`, kills of
 - Verify `/sys/kernel/security/lsm` contains `bpf`; otherwise BPF LSM hooks will not fire.
 - If `bpf` is missing from `/sys/kernel/security/lsm`, enable it by adding `bpf` to the kernel `lsm=` boot parameter (e.g., `lsm=landlock,lockdown,yama,bpf,integrity,apparmor`) or rebuilding with `CONFIG_BPF_LSM=y`.
 - Root privileges (CAP_SYS_ADMIN) to load LSM programs and manage cgroups.
+- Optional: `libsystemd-dev` to enable journald logging for events.
 - Ubuntu build deps:
   ```
   sudo apt-get update
   sudo apt-get install -y clang llvm libbpf-dev bpftool libelf-dev zlib1g-dev libzstd-dev pkg-config cmake make g++ linux-headers-$(uname -r)
   ```
+
+See `docs/PRODUCTION_READINESS.md` for the full production checklist. Operational
+runbooks are in `docs/UPGRADE.md` and `docs/INCIDENT_RESPONSE.md`.
 
 ## Build
 
@@ -21,13 +25,57 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
+## Install (optional)
+
+```
+sudo cmake --build build --target install
+```
+
+Installed files:
+- Binary: `/usr/bin/aegisbpf`
+- BPF object: `/usr/lib/aegisbpf/aegis.bpf.o`
+- Systemd unit: `/usr/lib/systemd/system/aegisbpf.service`
+- Env file: `/etc/default/aegisbpf`
+- Policy example: `/etc/aegisbpf/policy.example`
+
+## Package (CPack)
+
+```
+cd build
+cpack -G TGZ
+# Optional (requires dpkg-deb)
+cpack -G DEB
+# Optional (requires rpmbuild)
+cpack -G RPM
+```
+
+## Arm64 CI (QEMU)
+
+The CI workflow includes an arm64 build lane using QEMU and Docker. To reproduce
+locally:
+
+```
+docker run --rm --platform linux/arm64 \
+  -v "$PWD":/src \
+  -v /sys:/sys:ro \
+  -w /src \
+  ubuntu:24.04 \
+  bash -lc "apt-get update && apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build && cmake -S . -B build-arm64 -G Ninja && cmake --build build-arm64"
+```
+
 ## Run the agent
 
 ```
 sudo ./build/aegisbpf run
 # Audit-only (log without kill/EPERM)
 sudo ./build/aegisbpf run --audit
+# Send events to journald instead of stdout (requires libsystemd-dev at build time)
+sudo ./build/aegisbpf run --log=journald
 ```
+
+The agent loads its BPF object from the build path by default. For installed
+setups it falls back to `/usr/lib/aegisbpf/aegis.bpf.o`. Override with
+`AEGIS_BPF_OBJ=/path/to/aegis.bpf.o` if needed.
 
 If BPF LSM is not enabled, the agent automatically falls back to tracepoint audit-only mode
 (no enforcement). In that mode, file access auditing matches raw `openat` path strings and
@@ -77,11 +125,30 @@ Use policy files for repeatable rule sets (see `docs/POLICY.md`).
 ```
 sudo ./build/aegisbpf policy lint config/policy.example
 sudo ./build/aegisbpf policy apply config/policy.example --reset
+sudo ./build/aegisbpf policy apply config/policy.example --sha256 <hex>
+sudo ./build/aegisbpf policy apply config/policy.example --sha256-file /etc/aegisbpf/policy.sha256
 sudo ./build/aegisbpf policy export /tmp/aegis.policy
+sudo ./build/aegisbpf policy show
+sudo ./build/aegisbpf policy rollback
 ```
 
 `policy apply` is additive by default; use `--reset` to clear deny/allow maps and
 counters before applying. `deny_path` entries must exist at apply time.
+You can enforce integrity with `--sha256`, `--sha256-file`, or via
+`AEGIS_POLICY_SHA256`/`AEGIS_POLICY_SHA256_FILE`.
+`policy rollback` applies the previous policy stored at
+`/var/lib/aegisbpf/policy.applied.prev`.
+By default, `policy apply` will roll back to the last applied policy if the
+apply fails; use `--no-rollback` to disable.
+
+## Health check
+
+```
+./build/aegisbpf health
+```
+
+This reports prerequisite status (cgroup v2, bpffs, BTF, BPF LSM) and pin
+availability.
 
 ## Systemd packaging
 
@@ -89,8 +156,18 @@ Baseline units live in `packaging/systemd/`:
 - `packaging/systemd/aegisbpf.service`
 - `packaging/systemd/aegisbpf.env`
 
-Copy the env file to `/etc/default/aegisbpf` and set `AEGIS_POLICY` to your
-policy file path (for example `/etc/aegisbpf/policy.conf`).
+Edit `/etc/default/aegisbpf` and set `AEGIS_POLICY` to your policy file path
+(for example `/etc/aegisbpf/policy.conf`). The default points at
+`/etc/aegisbpf/policy.example`. Set `AEGIS_LOG` to `--log=journald` if you want
+events written to the journal.
+Set `AEGIS_SMOKE_TEST=1` to run `aegisbpf health` after service start.
+Set `AEGIS_POLICY_SHA256` or `AEGIS_POLICY_SHA256_FILE` to enforce policy
+integrity checks in the service.
+The unit uses systemd hardening (ProtectSystem, capability bounds, etc.); if it
+blocks your environment, adjust `packaging/systemd/aegisbpf.service`.
+
+If you install with a non-default `CMAKE_INSTALL_PREFIX`, update
+`packaging/systemd/aegisbpf.service` to point at the correct binary path.
 
 ## Stats
 
@@ -100,11 +177,30 @@ sudo ./build/aegisbpf stats
 
 Outputs counts of deny inode/path/allow entries plus per-CPU aggregated `blocks` and `ringbuf_drops`, and per-cgroup/per-inode/per-path block counters (with best-effort cgroup path resolution).
 
+## Metrics
+
+Prometheus text output (stdout or file):
+
+```
+sudo ./build/aegisbpf metrics
+sudo ./build/aegisbpf metrics --out /var/lib/aegisbpf/metrics.prom
+```
+
+## Performance harness
+
+A simple open/close micro-benchmark is in `docs/PERF.md`:
+
+```
+ITERATIONS=200000 FILE=/etc/hosts scripts/perf_open_bench.sh
+WITH_AGENT=1 ITERATIONS=200000 FILE=/etc/hosts scripts/perf_open_bench.sh
+MAX_PCT=10 ITERATIONS=200000 FILE=/etc/hosts sudo scripts/perf_compare.sh
+```
+
 ## Event format
 
 Ring buffer events are newline-delimited JSON:
-- EXEC: `{"type":"exec","pid":123,"ppid":1,"start_time":1234567890,"cgid":987,"cgroup_path":"/sys/fs/cgroup/...", "comm":"bash"}`
-- BLOCK: `{"type":"block","pid":123,"ppid":1,"start_time":1234,"parent_start_time":5678,"cgid":987,"cgroup_path":"/sys/fs/cgroup/...", "path":"/tmp/foo","resolved_path":"/tmp/foo","ino":42,"dev":2049,"action":"KILL","comm":"cat"}` (action is `AUDIT` when running with `--audit` or in tracepoint fallback)
+- EXEC: `{"type":"exec","pid":123,"ppid":1,"start_time":1234567890,"exec_id":"1234567890-123","cgid":987,"cgroup_path":"/sys/fs/cgroup/...", "comm":"bash"}`
+- BLOCK: `{"type":"block","pid":123,"ppid":1,"start_time":1234,"exec_id":"1234-123","parent_start_time":5678,"parent_exec_id":"5678-1","cgid":987,"cgroup_path":"/sys/fs/cgroup/...", "path":"/tmp/foo","resolved_path":"/tmp/foo","ino":42,"dev":2049,"action":"KILL","comm":"cat"}` (action is `AUDIT` when running with `--audit` or in tracepoint fallback)
 
 ## Smoke test
 
