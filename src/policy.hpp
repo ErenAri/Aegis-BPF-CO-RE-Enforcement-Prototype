@@ -7,7 +7,7 @@
 
 namespace aegis {
 
-struct BpfState;
+class BpfState;
 
 // Policy parsing
 Result<Policy> parse_policy_file(const std::string &path, PolicyIssues &issues);

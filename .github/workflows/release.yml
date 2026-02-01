@@ -74,7 +74,7 @@ jobs:
             -v /sys:/sys:ro \
             -w /src \
             ubuntu:24.04 \
-            bash -lc "apt-get update && apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build linux-tools-common && cmake -S . -B build-arm64 -G Ninja -DBUILD_TESTING=OFF && cmake --build build-arm64"
+            bash -lc "apt-get update && apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build && cmake -S . -B build-arm64 -G Ninja -DBUILD_TESTING=OFF -DSKIP_BPF_BUILD=ON && cmake --build build-arm64"
 
       - name: Create release archive
         run: |

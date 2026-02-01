@@ -14,10 +14,15 @@ option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_TESTING "Build tests" ON)
+option(SKIP_BPF_BUILD "Skip BPF object compilation (for cross-compilation)" OFF)
 
 find_program(CLANG clang REQUIRED)
-find_program(BPFTOOL bpftool REQUIRED)
 find_program(BASH bash REQUIRED)
+
+# bpftool is only required if we're building BPF objects
+if(NOT SKIP_BPF_BUILD)
+    find_program(BPFTOOL bpftool REQUIRED)
+endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBBPF REQUIRED libbpf)
@@ -60,55 +65,61 @@ set(BPF_OBJECT ${CMAKE_CURRENT_BINARY_DIR}/aegis.bpf.o)
 set(SKELETON_HEADER ${CMAKE_CURRENT_BINARY_DIR}/aegis.skel.h)
 set(VMLINUX_HEADER ${CMAKE_CURRENT_BINARY_DIR}/vmlinux.h)
 
-set(BPF_INCLUDE_DIRS ${CMAKE_CURRENT_BINARY_DIR})
-list(APPEND BPF_INCLUDE_DIRS ${LIBBPF_INCLUDE_DIRS})
-set(BPF_INCLUDE_FLAGS "")
-foreach(dir IN LISTS BPF_INCLUDE_DIRS)
-    list(APPEND BPF_INCLUDE_FLAGS -I${dir})
-endforeach()
+if(NOT SKIP_BPF_BUILD)
+    set(BPF_INCLUDE_DIRS ${CMAKE_CURRENT_BINARY_DIR})
+    list(APPEND BPF_INCLUDE_DIRS ${LIBBPF_INCLUDE_DIRS})
+    set(BPF_INCLUDE_FLAGS "")
+    foreach(dir IN LISTS BPF_INCLUDE_DIRS)
+        list(APPEND BPF_INCLUDE_FLAGS -I${dir})
+    endforeach()
 
-set(BPF_TARGET_ARCH)
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    set(BPF_TARGET_ARCH x86)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-    set(BPF_TARGET_ARCH arm64)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
-    set(BPF_TARGET_ARCH arm)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-    set(BPF_TARGET_ARCH powerpc)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
-    set(BPF_TARGET_ARCH s390)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
-    set(BPF_TARGET_ARCH riscv)
+    set(BPF_TARGET_ARCH)
+    if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+        set(BPF_TARGET_ARCH x86)
+    elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+        set(BPF_TARGET_ARCH arm64)
+    elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+        set(BPF_TARGET_ARCH arm)
+    elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+        set(BPF_TARGET_ARCH powerpc)
+    elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
+        set(BPF_TARGET_ARCH s390)
+    elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
+        set(BPF_TARGET_ARCH riscv)
+    else()
+        set(BPF_TARGET_ARCH ${CMAKE_SYSTEM_PROCESSOR})
+    endif()
+
+    # Generate vmlinux.h from kernel BTF
+    add_custom_command(
+        OUTPUT ${VMLINUX_HEADER}
+        COMMAND ${BASH} -c "${BPFTOOL} btf dump file /sys/kernel/btf/vmlinux format c > ${VMLINUX_HEADER}"
+        VERBATIM
+    )
+
+    # Compile BPF object
+    add_custom_command(
+        OUTPUT ${BPF_OBJECT}
+        COMMAND ${CLANG} -g -O2 -target bpf -D__TARGET_ARCH_${BPF_TARGET_ARCH} ${BPF_INCLUDE_FLAGS} -c ${BPF_SOURCE} -o ${BPF_OBJECT}
+        DEPENDS ${BPF_SOURCE} ${VMLINUX_HEADER}
+        VERBATIM
+    )
+
+    # Generate BPF skeleton header
+    add_custom_command(
+        OUTPUT ${SKELETON_HEADER}
+        COMMAND ${BASH} -c "${BPFTOOL} gen skeleton ${BPF_OBJECT} > ${SKELETON_HEADER}"
+        DEPENDS ${BPF_OBJECT}
+        VERBATIM
+    )
+
+    set_source_files_properties(${SKELETON_HEADER} PROPERTIES GENERATED TRUE)
+    add_custom_target(bpf_skel DEPENDS ${SKELETON_HEADER})
 else()
-    set(BPF_TARGET_ARCH ${CMAKE_SYSTEM_PROCESSOR})
+    # When skipping BPF build, create a dummy target
+    add_custom_target(bpf_skel)
+    message(STATUS "Skipping BPF build (SKIP_BPF_BUILD=ON)")
 endif()
-
-# Generate vmlinux.h from kernel BTF
-add_custom_command(
-    OUTPUT ${VMLINUX_HEADER}
-    COMMAND ${BASH} -c "${BPFTOOL} btf dump file /sys/kernel/btf/vmlinux format c > ${VMLINUX_HEADER}"
-    VERBATIM
-)
-
-# Compile BPF object
-add_custom_command(
-    OUTPUT ${BPF_OBJECT}
-    COMMAND ${CLANG} -g -O2 -target bpf -D__TARGET_ARCH_${BPF_TARGET_ARCH} ${BPF_INCLUDE_FLAGS} -c ${BPF_SOURCE} -o ${BPF_OBJECT}
-    DEPENDS ${BPF_SOURCE} ${VMLINUX_HEADER}
-    VERBATIM
-)
-
-# Generate BPF skeleton header
-add_custom_command(
-    OUTPUT ${SKELETON_HEADER}
-    COMMAND ${BASH} -c "${BPFTOOL} gen skeleton ${BPF_OBJECT} > ${SKELETON_HEADER}"
-    DEPENDS ${BPF_OBJECT}
-    VERBATIM
-)
-
-set_source_files_properties(${SKELETON_HEADER} PROPERTIES GENERATED TRUE)
-add_custom_target(bpf_skel DEPENDS ${SKELETON_HEADER})
 
 # Userspace source files
 set(AEGIS_SOURCES
@@ -134,8 +145,12 @@ set(AEGIS_HEADERS
 )
 
 # Build main executable
-add_executable(aegisbpf ${AEGIS_SOURCES} ${AEGIS_HEADERS} ${SKELETON_HEADER})
-add_dependencies(aegisbpf bpf_skel)
+if(NOT SKIP_BPF_BUILD)
+    add_executable(aegisbpf ${AEGIS_SOURCES} ${AEGIS_HEADERS} ${SKELETON_HEADER})
+    add_dependencies(aegisbpf bpf_skel)
+else()
+    add_executable(aegisbpf ${AEGIS_SOURCES} ${AEGIS_HEADERS})
+endif()
 
 target_include_directories(aegisbpf PRIVATE
     ${LIBBPF_INCLUDE_DIRS}

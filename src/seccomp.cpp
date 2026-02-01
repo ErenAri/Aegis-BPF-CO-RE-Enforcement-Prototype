@@ -29,7 +29,8 @@ namespace {
 
 // Syscall allowlist - these are the only syscalls aegisbpf needs
 // Organized by category for maintainability
-constexpr unsigned int ALLOWED_SYSCALLS[] = {
+// Note: Some syscalls are architecture-specific and wrapped in #ifdef
+static const unsigned int ALLOWED_SYSCALLS[] = {
     // BPF operations (core functionality)
     SYS_bpf,
     SYS_perf_event_open,
@@ -49,7 +50,9 @@ constexpr unsigned int ALLOWED_SYSCALLS[] = {
     SYS_pread64,
     SYS_pwrite64,
     SYS_lseek,
+#ifdef SYS_fstat
     SYS_fstat,
+#endif
 #ifdef SYS_newfstatat
     SYS_newfstatat,
 #endif
@@ -86,12 +89,16 @@ constexpr unsigned int ALLOWED_SYSCALLS[] = {
     // Event polling (for ring buffer)
     SYS_epoll_create1,
     SYS_epoll_ctl,
+#ifdef SYS_epoll_wait
     SYS_epoll_wait,
+#endif
     SYS_epoll_pwait,
 #ifdef SYS_epoll_pwait2
     SYS_epoll_pwait2,
 #endif
+#ifdef SYS_poll
     SYS_poll,
+#endif
     SYS_ppoll,
 
     // Socket operations (for journald sd_journal_* API)
@@ -103,7 +110,9 @@ constexpr unsigned int ALLOWED_SYSCALLS[] = {
 
     // Time operations
     SYS_clock_gettime,
+#ifdef SYS_gettimeofday
     SYS_gettimeofday,
+#endif
     SYS_nanosleep,
     SYS_clock_nanosleep,
 
@@ -116,7 +125,9 @@ constexpr unsigned int ALLOWED_SYSCALLS[] = {
     SYS_clone3,
 #endif
     SYS_set_tid_address,
+#ifdef SYS_rseq
     SYS_rseq,
+#endif
 
     // Memory locking (for BPF map access)
     SYS_mlock,
@@ -133,8 +144,12 @@ constexpr unsigned int ALLOWED_SYSCALLS[] = {
 
     // Misc required
     SYS_getrandom,
+#ifdef SYS_arch_prctl
     SYS_arch_prctl,
+#endif
+#ifdef SYS_access
     SYS_access,
+#endif
     SYS_faccessat,
 #ifdef SYS_faccessat2
     SYS_faccessat2,
@@ -145,14 +160,18 @@ constexpr unsigned int ALLOWED_SYSCALLS[] = {
 
     // For popen() in utils.cpp (kernel config check)
     SYS_pipe2,
+#ifdef SYS_dup2
     SYS_dup2,
+#endif
     SYS_dup3,
     SYS_execve,
     SYS_wait4,
+#ifdef SYS_vfork
     SYS_vfork,
+#endif
 };
 
-constexpr size_t NUM_ALLOWED = sizeof(ALLOWED_SYSCALLS) / sizeof(ALLOWED_SYSCALLS[0]);
+static const size_t NUM_ALLOWED = sizeof(ALLOWED_SYSCALLS) / sizeof(ALLOWED_SYSCALLS[0]);
 
 } // anonymous namespace
 
