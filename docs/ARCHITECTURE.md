@@ -32,7 +32,7 @@ AegisBPF uses eBPF (extended Berkeley Packet Filter) to monitor and optionally b
 │  │                    BPF Subsystem                          │  │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐│  │
 │  │  │ LSM Hook    │  │ Tracepoint  │  │      BPF Maps       ││  │
-│  │  │ bprm_check  │  │ sched_exec  │  │  ┌───────────────┐  ││  │
+│  │  │ file_open   │  │ sched_exec  │  │  ┌───────────────┐  ││  │
 │  │  │             │  │             │  │  │ deny_inode    │  ││  │
 │  │  │  (enforce)  │  │  (audit)    │  │  │ deny_path     │  ││  │
 │  │  │             │  │             │  │  │ allow_cgroup  │  ││  │
@@ -56,16 +56,16 @@ AegisBPF uses eBPF (extended Berkeley Packet Filter) to monitor and optionally b
 
 The BPF program runs in kernel context and implements:
 
-1. **LSM Hook (bprm_check_security)**
-   - Called before execve() completes
-   - Can return -EPERM to block execution
-   - Checks deny_inode, deny_path, and allow_cgroup maps
+1. **LSM Hook (file_open)**
+   - Called on file open attempts
+   - Can return -EPERM to block access
+   - Checks deny_inode and allow_cgroup maps
    - Only active when BPF LSM is enabled
 
-2. **Tracepoint (sched_process_exec)**
-   - Called after successful exec
-   - Used for audit-only monitoring
-   - Works without BPF LSM
+2. **Tracepoints**
+   - `sched_process_exec`: emits EXEC events for process executions
+   - `sys_enter_openat`: emits audit-only BLOCK events for deny_path matches
+   - Works without BPF LSM (audit-only paths)
 
 3. **BPF Maps**
    - `deny_inode`: Hash map of blocked (dev, inode) pairs
@@ -155,25 +155,22 @@ Error handling:
 
 ## Data Flow
 
-### Execution Blocking (Enforce Mode)
+### File Access Blocking (Enforce Mode)
 
 ```
-1. Process calls execve("/usr/bin/foo")
+1. Process calls open("/etc/shadow")
            │
            ▼
-2. Kernel invokes bprm_check_security LSM hook
+2. Kernel invokes file_open LSM hook
            │
            ▼
-3. BPF program aegis_bprm_check runs
+3. BPF program handle_file_open runs
            │
            ├─── Check allow_cgroup map
            │    └─ If cgroup allowed → ALLOW
            │
-           ├─── Check deny_inode map
-           │    └─ If inode blocked → DENY + emit event
-           │
-           └─── Check deny_path map
-                └─ If path blocked → DENY + emit event
+           └─── Check deny_inode map
+                └─ If inode blocked → DENY + emit event
            │
            ▼
 4. Return 0 (allow) or -EPERM (deny)
@@ -191,7 +188,7 @@ Error handling:
 ### Audit Mode
 
 ```
-1. Process calls execve("/usr/bin/foo")
+1. Process executes a binary (execve)
            │
            ▼
 2. execve() completes successfully
@@ -200,16 +197,35 @@ Error handling:
 3. Kernel fires sched_process_exec tracepoint
            │
            ▼
-4. BPF program aegis_exec runs
+4. BPF program handle_execve runs
            │
            ▼
-5. Event emitted to ring buffer
+5. EXEC event emitted to ring buffer
            │
            ▼
 6. aegisbpf daemon receives event
            │
            ▼
 7. Event logged to journald/stdout
+```
+
+```
+1. Process opens a file (open/openat)
+           │
+           ▼
+2. Kernel fires sys_enter_openat tracepoint
+           │
+           ▼
+3. BPF program handle_openat runs
+           │
+           ▼
+4. If path is in deny_path, emit audit-only BLOCK event
+           │
+           ▼
+5. aegisbpf daemon receives event
+           │
+           ▼
+6. Event logged to journald/stdout
 ```
 
 ## BPF Map Pinning
@@ -286,7 +302,7 @@ Benefits:
 
 ## Performance Characteristics
 
-- **BPF overhead**: ~100-500ns per execve()
+- **BPF overhead**: ~100-500ns per file open
 - **Map lookups**: O(1) hash table operations
 - **Ring buffer**: Lock-free producer-consumer
 - **Memory usage**: ~10MB base + map sizes

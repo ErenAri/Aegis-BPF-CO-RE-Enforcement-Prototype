@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -16,7 +17,14 @@ inline constexpr const char *kDenyCgroupStatsPin = "/sys/fs/bpf/aegisbpf/deny_cg
 inline constexpr const char *kDenyInodeStatsPin = "/sys/fs/bpf/aegisbpf/deny_inode_stats";
 inline constexpr const char *kDenyPathStatsPin = "/sys/fs/bpf/aegisbpf/deny_path_stats";
 inline constexpr const char *kAgentMetaPin = "/sys/fs/bpf/aegisbpf/agent_meta";
+inline constexpr const char *kSurvivalAllowlistPin = "/sys/fs/bpf/aegisbpf/survival_allowlist";
 inline constexpr const char *kBpfObjInstallPath = "/usr/lib/aegisbpf/aegis.bpf.o";
+
+// Break-glass detection paths
+inline constexpr const char *kBreakGlassPath = "/etc/aegisbpf/break_glass";
+inline constexpr const char *kBreakGlassVarPath = "/var/lib/aegisbpf/break_glass";
+inline constexpr const char *kBreakGlassTokenPath = "/etc/aegisbpf/break_glass.token";
+inline constexpr const char *kVersionCounterPath = "/var/lib/aegisbpf/version_counter";
 inline constexpr const char *kDenyDbDir = "/var/lib/aegisbpf";
 inline constexpr const char *kDenyDbPath = "/var/lib/aegisbpf/deny.db";
 inline constexpr const char *kPolicyAppliedPath = "/var/lib/aegisbpf/policy.applied";
@@ -93,8 +101,35 @@ struct PathKey {
 
 using DenyEntries = std::unordered_map<InodeId, std::string, InodeIdHash>;
 
+// Enhanced deny entry with full tracking information
+struct DenyEntry {
+    InodeId id;
+    std::string original_path;    // What user specified
+    std::string resolved_path;    // Canonical path
+    uint64_t added_timestamp;
+    std::string source;           // "policy:/path" or "cli"
+};
+
+// Signed policy bundle format
+struct SignedPolicyBundle {
+    uint32_t format_version;      // Bundle format (1)
+    uint64_t policy_version;      // Monotonic counter
+    uint64_t timestamp;           // Unix timestamp
+    uint64_t expires;             // Expiration (0 = none)
+    std::array<uint8_t, 32> signer_key;
+    std::array<uint8_t, 64> signature;
+    std::string policy_sha256;
+    std::string policy_content;
+};
+
 struct AgentConfig {
     uint8_t audit_only;
+    uint8_t deadman_enabled;
+    uint8_t break_glass_active;
+    uint8_t _pad;
+    uint64_t deadman_deadline_ns;
+    uint32_t deadman_ttl_seconds;
+    uint32_t _pad2;
 };
 
 struct AgentMeta {

@@ -50,6 +50,11 @@ Security goals:
   open with audit signal when only tracepoint fallback is available.
 - Upgrade: pinned maps must be forward-compatible or require explicit reset.
 
+## Operational SLOs (initial targets)
+- Event loss (ring buffer drops): <0.1% at steady state.
+- Metrics freshness: scrape interval <=30s with no stale counters for >30m.
+- Health check: `aegisbpf health` completes in <1s.
+
 ## Operational requirements
 - Systemd unit and env file for managed deployments.
 - CI build on supported kernels with pinned dependency versions.

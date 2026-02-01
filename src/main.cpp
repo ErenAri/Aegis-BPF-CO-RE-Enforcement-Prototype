@@ -5,7 +5,9 @@
  */
 
 #include "bpf_ops.hpp"
+#include "crypto.hpp"
 #include "events.hpp"
+#include "kernel_features.hpp"
 #include "logging.hpp"
 #include "policy.hpp"
 #include "seccomp.hpp"
@@ -14,23 +16,55 @@
 #include "utils.hpp"
 
 #include <bpf/libbpf.h>
+#include <atomic>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <sys/stat.h>
+#include <thread>
 #include <unistd.h>
 
 namespace aegis {
 
 static volatile sig_atomic_t g_exiting = 0;
+static std::atomic<bool> g_heartbeat_running{false};
 
 static void handle_signal(int)
 {
     g_exiting = 1;
+}
+
+// Heartbeat thread for deadman switch - updates deadline every TTL/2
+static void heartbeat_thread(BpfState *state, uint32_t ttl_seconds)
+{
+    uint32_t sleep_interval = ttl_seconds / 2;
+    if (sleep_interval < 1) {
+        sleep_interval = 1;
+    }
+
+    while (g_heartbeat_running.load() && !g_exiting) {
+        // Calculate new deadline
+        struct timespec ts{};
+        clock_gettime(CLOCK_BOOTTIME, &ts);
+        uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
+        uint64_t new_deadline = now_ns + (static_cast<uint64_t>(ttl_seconds) * 1000000000ULL);
+
+        auto result = update_deadman_deadline(*state, new_deadline);
+        if (!result) {
+            logger().log(SLOG_WARN("Failed to update deadman deadline")
+                .field("error", result.error().to_string()));
+        }
+
+        // Sleep for TTL/2, but check exit flag more frequently
+        for (uint32_t i = 0; i < sleep_interval && g_heartbeat_running.load() && !g_exiting; ++i) {
+            sleep(1);
+        }
+    }
 }
 
 static Result<void> setup_agent_cgroup(BpfState &state)
@@ -67,22 +101,51 @@ static Result<void> setup_agent_cgroup(BpfState &state)
     return {};
 }
 
-static int run(bool audit_only, bool enable_seccomp)
+static int run(bool audit_only, bool enable_seccomp, uint32_t deadman_ttl = 0)
 {
-    auto prereqs_result = check_prereqs();
-    if (!prereqs_result) {
-        logger().log(SLOG_ERROR("Prerequisites check failed")
-            .field("error", prereqs_result.error().to_string()));
+    // Check for break-glass mode FIRST
+    bool break_glass_active = detect_break_glass();
+    if (break_glass_active) {
+        logger().log(SLOG_WARN("Break-glass mode detected - forcing audit-only mode"));
+        audit_only = true;
+    }
+
+    // Detect kernel features for graceful degradation
+    auto features_result = detect_kernel_features();
+    if (!features_result) {
+        logger().log(SLOG_ERROR("Failed to detect kernel features")
+            .field("error", features_result.error().to_string()));
         return 1;
     }
-    bool lsm_enabled = *prereqs_result;
+    KernelFeatures features = *features_result;
 
-    if (!lsm_enabled) {
+    // Determine enforcement capability
+    EnforcementCapability cap = determine_capability(features);
+    logger().log(SLOG_INFO("Kernel feature detection complete")
+        .field("kernel_version", features.kernel_version)
+        .field("capability", capability_name(cap))
+        .field("bpf_lsm", features.bpf_lsm)
+        .field("cgroup_v2", features.cgroup_v2)
+        .field("btf", features.btf)
+        .field("ringbuf", features.ringbuf));
+
+    // Handle capability-based decisions
+    if (cap == EnforcementCapability::Disabled) {
+        logger().log(SLOG_ERROR("Cannot run AegisBPF on this system")
+            .field("explanation", capability_explanation(features, cap)));
+        return 1;
+    }
+
+    bool lsm_enabled = features.bpf_lsm;
+
+    if (cap == EnforcementCapability::AuditOnly) {
         if (!audit_only) {
-            logger().log(SLOG_WARN("BPF LSM not enabled; falling back to tracepoint audit-only mode"));
+            logger().log(SLOG_WARN("Full enforcement not available; falling back to audit-only mode")
+                .field("explanation", capability_explanation(features, cap)));
             audit_only = true;
         } else {
-            logger().log(SLOG_INFO("BPF LSM not enabled; running in tracepoint audit-only mode"));
+            logger().log(SLOG_INFO("Running in audit-only mode")
+                .field("explanation", capability_explanation(features, cap)));
         }
     }
 
@@ -111,11 +174,33 @@ static int run(bool audit_only, bool enable_seccomp)
         return 1;
     }
 
-    auto config_result = set_agent_config(state, audit_only);
+    // Set up full agent config with deadman switch and break-glass
+    AgentConfig config{};
+    config.audit_only = audit_only ? 1 : 0;
+    config.break_glass_active = break_glass_active ? 1 : 0;
+    config.deadman_enabled = (deadman_ttl > 0) ? 1 : 0;
+    config.deadman_ttl_seconds = deadman_ttl;
+    if (config.deadman_enabled) {
+        // Set initial deadline to now + TTL
+        struct timespec ts{};
+        clock_gettime(CLOCK_BOOTTIME, &ts);
+        uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
+        config.deadman_deadline_ns = now_ns + (static_cast<uint64_t>(deadman_ttl) * 1000000000ULL);
+    }
+
+    auto config_result = set_agent_config_full(state, config);
     if (!config_result) {
         logger().log(SLOG_ERROR("Failed to set agent config")
             .field("error", config_result.error().to_string()));
         return 1;
+    }
+
+    // Populate survival allowlist with critical binaries
+    auto survival_result = populate_survival_allowlist(state);
+    if (!survival_result) {
+        logger().log(SLOG_WARN("Failed to populate survival allowlist")
+            .field("error", survival_result.error().to_string()));
+        // Not fatal - continue with startup
     }
 
     auto cgroup_result = setup_agent_cgroup(state);
@@ -151,7 +236,18 @@ static int run(bool audit_only, bool enable_seccomp)
     logger().log(SLOG_INFO("Agent started")
         .field("audit_only", audit_only)
         .field("lsm_enabled", lsm_enabled)
-        .field("seccomp", enable_seccomp));
+        .field("seccomp", enable_seccomp)
+        .field("break_glass", break_glass_active)
+        .field("deadman_ttl", static_cast<int64_t>(deadman_ttl)));
+
+    // Start heartbeat thread if deadman switch is enabled
+    std::thread heartbeat;
+    if (deadman_ttl > 0) {
+        g_heartbeat_running.store(true);
+        heartbeat = std::thread(heartbeat_thread, &state, deadman_ttl);
+        logger().log(SLOG_INFO("Deadman switch heartbeat started")
+            .field("ttl_seconds", static_cast<int64_t>(deadman_ttl)));
+    }
 
     int err = 0;
     while (!g_exiting) {
@@ -164,6 +260,12 @@ static int run(bool audit_only, bool enable_seccomp)
             logger().log(SLOG_ERROR("Ring buffer poll failed").error_code(-err));
             break;
         }
+    }
+
+    // Stop heartbeat thread
+    if (deadman_ttl > 0 && heartbeat.joinable()) {
+        g_heartbeat_running.store(false);
+        heartbeat.join();
     }
 
     logger().log(SLOG_INFO("Agent stopped"));
@@ -301,6 +403,7 @@ static int block_clear()
     std::remove(kDenyInodeStatsPin);
     std::remove(kDenyPathStatsPin);
     std::remove(kAgentMetaPin);
+    std::remove(kSurvivalAllowlistPin);
     std::filesystem::remove(kDenyDbPath);
     std::filesystem::remove(kPolicyAppliedPath);
     std::filesystem::remove(kPolicyAppliedPrevPath);
@@ -408,13 +511,315 @@ static int allow_list()
     return 0;
 }
 
+static int survival_list()
+{
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+            .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto entries_result = read_survival_allowlist(state);
+    if (!entries_result) {
+        logger().log(SLOG_ERROR("Failed to read survival allowlist")
+            .field("error", entries_result.error().to_string()));
+        return 1;
+    }
+
+    auto entries = *entries_result;
+    if (entries.empty()) {
+        std::cout << "Survival allowlist is empty" << std::endl;
+        return 0;
+    }
+
+    std::cout << "Survival allowlist entries: " << entries.size() << std::endl;
+    for (const auto &id : entries) {
+        std::cout << "  " << inode_to_string(id) << std::endl;
+    }
+    return 0;
+}
+
+static int survival_verify()
+{
+    // List of critical binaries that should be in the survival allowlist
+    static const char *binaries[] = {
+        "/sbin/init",
+        "/lib/systemd/systemd",
+        "/usr/lib/systemd/systemd",
+        "/usr/bin/kubelet",
+        "/usr/local/bin/kubelet",
+        "/usr/sbin/sshd",
+        "/usr/bin/ssh",
+        "/usr/bin/containerd",
+        "/usr/bin/runc",
+        "/usr/bin/dockerd",
+        "/usr/bin/sudo",
+        "/bin/bash",
+        "/usr/bin/bash",
+        "/bin/sh",
+        nullptr
+    };
+
+    std::cout << "Verifying critical binaries exist on system:" << std::endl;
+    int found = 0;
+    int missing = 0;
+
+    for (int i = 0; binaries[i] != nullptr; ++i) {
+        struct stat st{};
+        if (stat(binaries[i], &st) == 0) {
+            std::cout << "  [OK] " << binaries[i] << " (" << st.st_dev << ":" << st.st_ino << ")" << std::endl;
+            ++found;
+        } else {
+            std::cout << "  [--] " << binaries[i] << " (not found)" << std::endl;
+            ++missing;
+        }
+    }
+
+    std::cout << "\nFound: " << found << ", Missing: " << missing << std::endl;
+    return 0;
+}
+
+static int keys_list()
+{
+    auto keys_result = load_trusted_keys();
+    if (!keys_result) {
+        logger().log(SLOG_ERROR("Failed to load trusted keys")
+            .field("error", keys_result.error().to_string()));
+        return 1;
+    }
+
+    auto keys = *keys_result;
+    if (keys.empty()) {
+        std::cout << "No trusted keys found in /etc/aegisbpf/keys/" << std::endl;
+        return 0;
+    }
+
+    std::cout << "Trusted keys (" << keys.size() << "):" << std::endl;
+    for (const auto &key : keys) {
+        std::cout << "  " << encode_hex(key) << std::endl;
+    }
+    return 0;
+}
+
+static int keys_add(const std::string &key_file)
+{
+    std::ifstream in(key_file);
+    if (!in.is_open()) {
+        logger().log(SLOG_ERROR("Failed to open key file").field("path", key_file));
+        return 1;
+    }
+
+    std::string line;
+    if (!std::getline(in, line)) {
+        logger().log(SLOG_ERROR("Failed to read key from file"));
+        return 1;
+    }
+
+    auto key_result = decode_public_key(line);
+    if (!key_result) {
+        logger().log(SLOG_ERROR("Invalid public key format")
+            .field("error", key_result.error().to_string()));
+        return 1;
+    }
+
+    // Create keys directory if needed
+    std::error_code ec;
+    std::filesystem::create_directories("/etc/aegisbpf/keys", ec);
+    if (ec) {
+        logger().log(SLOG_ERROR("Failed to create keys directory")
+            .field("error", ec.message()));
+        return 1;
+    }
+
+    // Generate output filename from key fingerprint
+    std::string key_hex = encode_hex(*key_result);
+    std::string out_path = "/etc/aegisbpf/keys/" + key_hex.substr(0, 16) + ".pub";
+
+    std::ofstream out(out_path);
+    if (!out.is_open()) {
+        logger().log(SLOG_ERROR("Failed to create key file").field("path", out_path));
+        return 1;
+    }
+
+    out << key_hex << std::endl;
+    std::cout << "Added trusted key: " << out_path << std::endl;
+    return 0;
+}
+
+static int policy_sign(const std::string &policy_path, const std::string &key_path,
+                       const std::string &output_path)
+{
+    // Read policy file
+    std::ifstream policy_in(policy_path);
+    if (!policy_in.is_open()) {
+        logger().log(SLOG_ERROR("Failed to open policy file").field("path", policy_path));
+        return 1;
+    }
+    std::stringstream policy_ss;
+    policy_ss << policy_in.rdbuf();
+    std::string policy_content = policy_ss.str();
+
+    // Read private key file (64 bytes hex = 128 chars, or binary)
+    std::ifstream key_in(key_path);
+    if (!key_in.is_open()) {
+        logger().log(SLOG_ERROR("Failed to open private key file").field("path", key_path));
+        return 1;
+    }
+    std::string key_hex;
+    std::getline(key_in, key_hex);
+
+    SecretKey secret_key{};
+    if (key_hex.size() == 128) {
+        // Hex encoded
+        for (size_t i = 0; i < 64; ++i) {
+            char hi = key_hex[2*i];
+            char lo = key_hex[2*i + 1];
+            auto hex_val = [](char c) -> uint8_t {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+                if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+                return 0;
+            };
+            secret_key[i] = (hex_val(hi) << 4) | hex_val(lo);
+        }
+    } else {
+        logger().log(SLOG_ERROR("Invalid private key format (expected 128 hex chars)"));
+        return 1;
+    }
+
+    // Get current version and increment
+    uint64_t version = read_version_counter() + 1;
+
+    // Create signed bundle
+    auto bundle_result = create_signed_bundle(policy_content, secret_key, version, 0);
+    if (!bundle_result) {
+        logger().log(SLOG_ERROR("Failed to create signed bundle")
+            .field("error", bundle_result.error().to_string()));
+        return 1;
+    }
+
+    // Write output
+    std::ofstream out(output_path);
+    if (!out.is_open()) {
+        logger().log(SLOG_ERROR("Failed to create output file").field("path", output_path));
+        return 1;
+    }
+
+    out << *bundle_result;
+    std::cout << "Created signed policy bundle: " << output_path << std::endl;
+    std::cout << "Policy version: " << version << std::endl;
+    return 0;
+}
+
+static int policy_apply_signed(const std::string &bundle_path, bool require_signature)
+{
+    // Read bundle file
+    std::ifstream in(bundle_path);
+    if (!in.is_open()) {
+        logger().log(SLOG_ERROR("Failed to open bundle file").field("path", bundle_path));
+        return 1;
+    }
+    std::stringstream ss;
+    ss << in.rdbuf();
+    std::string content = ss.str();
+
+    // Check if it's a signed bundle
+    if (content.find("AEGIS-POLICY-BUNDLE") == 0) {
+        // Parse signed bundle
+        auto bundle_result = parse_signed_bundle(content);
+        if (!bundle_result) {
+            logger().log(SLOG_ERROR("Failed to parse signed bundle")
+                .field("error", bundle_result.error().to_string()));
+            return 1;
+        }
+        auto bundle = *bundle_result;
+
+        // Load trusted keys
+        auto keys_result = load_trusted_keys();
+        if (!keys_result) {
+            logger().log(SLOG_ERROR("Failed to load trusted keys")
+                .field("error", keys_result.error().to_string()));
+            return 1;
+        }
+        auto trusted_keys = *keys_result;
+
+        if (trusted_keys.empty()) {
+            logger().log(SLOG_ERROR("No trusted keys configured - cannot verify signed policy"));
+            return 1;
+        }
+
+        // Verify bundle
+        auto verify_result = verify_bundle(bundle, trusted_keys);
+        if (!verify_result) {
+            logger().log(SLOG_ERROR("Bundle verification failed")
+                .field("error", verify_result.error().to_string()));
+            return 1;
+        }
+
+        // Check anti-rollback
+        if (!check_version_acceptable(bundle)) {
+            logger().log(SLOG_ERROR("Policy version rollback rejected")
+                .field("bundle_version", static_cast<int64_t>(bundle.policy_version))
+                .field("current_version", static_cast<int64_t>(read_version_counter())));
+            return 1;
+        }
+
+        logger().log(SLOG_INFO("Signed bundle verified successfully")
+            .field("version", static_cast<int64_t>(bundle.policy_version))
+            .field("signer", encode_hex(bundle.signer_key).substr(0, 16) + "..."));
+
+        // Write policy content to temp file and apply
+        std::string temp_path = "/tmp/aegisbpf_policy_" + std::to_string(getpid()) + ".conf";
+        {
+            std::ofstream temp_out(temp_path);
+            temp_out << bundle.policy_content;
+        }
+
+        auto apply_result = policy_apply(temp_path, false, bundle.policy_sha256, "", true);
+        std::remove(temp_path.c_str());
+
+        if (!apply_result) {
+            return 1;
+        }
+
+        // Update version counter
+        auto write_result = write_version_counter(bundle.policy_version);
+        if (!write_result) {
+            logger().log(SLOG_WARN("Failed to update version counter")
+                .field("error", write_result.error().to_string()));
+        }
+
+        return 0;
+    }
+
+    // Not a signed bundle
+    if (require_signature) {
+        logger().log(SLOG_ERROR("Unsigned policy rejected (--require-signature specified)"));
+        return 1;
+    }
+
+    // Fall back to regular policy apply
+    auto apply_result = policy_apply(bundle_path, false, "", "", true);
+    return apply_result ? 0 : 1;
+}
+
 static int health()
 {
     bool ok = true;
     std::error_code ec;
-    bool cgroup_ok = path_exists("/sys/fs/cgroup/cgroup.controllers", ec);
-    bool bpffs_ok = path_exists("/sys/fs/bpf", ec);
-    bool btf_ok = path_exists("/sys/kernel/btf/vmlinux", ec);
+
+    // Detect kernel features
+    auto features_result = detect_kernel_features();
+    KernelFeatures features;
+    if (features_result) {
+        features = *features_result;
+    }
+
+    bool cgroup_ok = features.cgroup_v2;
+    bool bpffs_ok = check_bpffs_mounted();
+    bool btf_ok = features.btf;
     std::string obj_path = resolve_bpf_obj_path();
     bool obj_ok = path_exists(obj_path.c_str(), ec);
 
@@ -424,13 +829,25 @@ static int health()
 
     bool is_root = geteuid() == 0;
     std::cout << "euid: " << geteuid() << "\n";
+    std::cout << "kernel_version: " << features.kernel_version << "\n";
     std::cout << "cgroup_v2: " << (cgroup_ok ? "ok" : "missing") << "\n";
     std::cout << "bpffs: " << (bpffs_ok ? "ok" : "missing") << "\n";
     std::cout << "btf: " << (btf_ok ? "ok" : "missing") << "\n";
     std::cout << "bpf_obj_path: " << obj_path << (obj_ok ? "" : " (missing)") << "\n";
 
-    bool lsm_enabled = kernel_bpf_lsm_enabled();
+    bool lsm_enabled = features.bpf_lsm;
     std::cout << "bpf_lsm_enabled: " << (lsm_enabled ? "yes" : "no") << "\n";
+    std::cout << "ringbuf_support: " << (features.ringbuf ? "yes" : "no") << "\n";
+    std::cout << "tracepoints: " << (features.tracepoints ? "yes" : "no") << "\n";
+
+    // Determine enforcement capability
+    EnforcementCapability cap = determine_capability(features);
+    std::cout << "enforcement_capability: " << capability_name(cap) << "\n";
+    std::cout << "capability_explanation: " << capability_explanation(features, cap) << "\n";
+
+    // Check for break-glass mode
+    bool break_glass = detect_break_glass();
+    std::cout << "break_glass_active: " << (break_glass ? "yes" : "no") << "\n";
 
     std::string lsm_list = read_file_first_line("/sys/kernel/security/lsm");
     if (!lsm_list.empty()) {
@@ -470,6 +887,7 @@ static int health()
         {"deny_inode_stats", kDenyInodeStatsPin},
         {"deny_path_stats", kDenyPathStatsPin},
         {"agent_meta", kAgentMetaPin},
+        {"survival_allowlist", kSurvivalAllowlistPin},
     };
 
     if (is_root) {
@@ -730,11 +1148,14 @@ static LogLevel parse_log_level(const std::string &level)
 static int usage(const char *prog)
 {
     std::cerr << "Usage: " << prog
-              << " run [--audit|--enforce] [--seccomp] [--log=stdout|journald|both] [--log-level=debug|info|warn|error] [--log-format=text|json]"
+              << " run [--audit|--enforce] [--seccomp] [--deadman-ttl=<seconds>] [--log=stdout|journald|both] [--log-level=debug|info|warn|error] [--log-format=text|json]"
               << " | block {add|del|list|clear} [path]"
               << " | allow {add|del} <cgroup_path> | allow list"
-              << " | policy {lint|apply|export} <file> [--reset] [--sha256 <hex>|--sha256-file <path>] [--no-rollback]"
+              << " | survival {list|verify}"
+              << " | policy {lint|apply|export} <file> [--reset] [--sha256 <hex>|--sha256-file <path>] [--no-rollback] [--require-signature]"
+              << " | policy sign <policy.conf> --key <private.key> --output <policy.signed>"
               << " | policy {show|rollback}"
+              << " | keys {list|add <pubkey.pub>}"
               << " | stats"
               << " | metrics [--out <path>]"
               << " | health" << std::endl;
@@ -772,6 +1193,7 @@ int main(int argc, char **argv)
     if (cmd == "run") {
         bool audit_only = false;
         bool enable_seccomp = false;
+        uint32_t deadman_ttl = 0;
         for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--audit" || arg == "--mode=audit") {
@@ -780,6 +1202,25 @@ int main(int argc, char **argv)
                 audit_only = false;
             } else if (arg == "--seccomp") {
                 enable_seccomp = true;
+            } else if (arg.rfind("--deadman-ttl=", 0) == 0) {
+                std::string value = arg.substr(std::strlen("--deadman-ttl="));
+                uint64_t ttl = 0;
+                if (!parse_uint64(value, ttl) || ttl > UINT32_MAX) {
+                    logger().log(SLOG_ERROR("Invalid deadman TTL value").field("value", value));
+                    return 1;
+                }
+                deadman_ttl = static_cast<uint32_t>(ttl);
+            } else if (arg == "--deadman-ttl") {
+                if (i + 1 >= argc) {
+                    return usage(argv[0]);
+                }
+                std::string value = argv[++i];
+                uint64_t ttl = 0;
+                if (!parse_uint64(value, ttl) || ttl > UINT32_MAX) {
+                    logger().log(SLOG_ERROR("Invalid deadman TTL value").field("value", value));
+                    return 1;
+                }
+                deadman_ttl = static_cast<uint32_t>(ttl);
             } else if (arg.rfind("--log=", 0) == 0) {
                 std::string value = arg.substr(std::strlen("--log="));
                 if (!set_event_log_sink(value)) {
@@ -799,7 +1240,7 @@ int main(int argc, char **argv)
                 return usage(argv[0]);
             }
         }
-        return run(audit_only, enable_seccomp);
+        return run(audit_only, enable_seccomp, deadman_ttl);
     }
 
     if (cmd == "block") {
@@ -854,6 +1295,20 @@ int main(int argc, char **argv)
         return usage(argv[0]);
     }
 
+    if (cmd == "survival") {
+        if (argc < 3) {
+            return usage(argv[0]);
+        }
+        std::string sub = argv[2];
+        if (sub == "list") {
+            return survival_list();
+        }
+        if (sub == "verify") {
+            return survival_verify();
+        }
+        return usage(argv[0]);
+    }
+
     if (cmd == "policy") {
         if (argc < 3) {
             return usage(argv[0]);
@@ -872,6 +1327,7 @@ int main(int argc, char **argv)
             }
             bool reset = false;
             bool rollback_on_failure = true;
+            bool require_signature = false;
             std::string sha256;
             std::string sha256_file;
             for (int i = 4; i < argc; ++i) {
@@ -880,6 +1336,8 @@ int main(int argc, char **argv)
                     reset = true;
                 } else if (arg == "--no-rollback") {
                     rollback_on_failure = false;
+                } else if (arg == "--require-signature") {
+                    require_signature = true;
                 } else if (arg == "--sha256") {
                     if (i + 1 >= argc) {
                         return usage(argv[0]);
@@ -894,8 +1352,39 @@ int main(int argc, char **argv)
                     return usage(argv[0]);
                 }
             }
+            // Check if file looks like a signed bundle
+            std::ifstream check_file(argv[3]);
+            std::string first_line;
+            std::getline(check_file, first_line);
+            check_file.close();
+            if (first_line.find("AEGIS-POLICY-BUNDLE") == 0 || require_signature) {
+                return policy_apply_signed(argv[3], require_signature);
+            }
             auto result = policy_apply(argv[3], reset, sha256, sha256_file, rollback_on_failure);
             return result ? 0 : 1;
+        }
+        if (sub == "sign") {
+            if (argc < 4) {
+                return usage(argv[0]);
+            }
+            std::string key_path;
+            std::string output_path;
+            for (int i = 4; i < argc; ++i) {
+                std::string arg = argv[i];
+                if (arg == "--key") {
+                    if (i + 1 >= argc) return usage(argv[0]);
+                    key_path = argv[++i];
+                } else if (arg == "--output") {
+                    if (i + 1 >= argc) return usage(argv[0]);
+                    output_path = argv[++i];
+                } else {
+                    return usage(argv[0]);
+                }
+            }
+            if (key_path.empty() || output_path.empty()) {
+                return usage(argv[0]);
+            }
+            return policy_sign(argv[3], key_path, output_path);
         }
         if (sub == "export") {
             if (argc != 4) {
@@ -917,6 +1406,23 @@ int main(int argc, char **argv)
             }
             auto result = policy_rollback();
             return result ? 0 : 1;
+        }
+        return usage(argv[0]);
+    }
+
+    if (cmd == "keys") {
+        if (argc < 3) {
+            return usage(argv[0]);
+        }
+        std::string sub = argv[2];
+        if (sub == "list") {
+            return keys_list();
+        }
+        if (sub == "add") {
+            if (argc != 4) {
+                return usage(argv[0]);
+            }
+            return keys_add(argv[3]);
         }
         return usage(argv[0]);
     }

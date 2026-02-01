@@ -1,6 +1,6 @@
 # AegisBPF
 
-**AegisBPF** is an eBPF-based runtime security agent that monitors and blocks unauthorized process executions using Linux Security Modules (LSM). It provides kernel-level enforcement with minimal overhead.
+**AegisBPF** is an eBPF-based runtime security agent that monitors and blocks unauthorized file access using Linux Security Modules (LSM). It provides kernel-level enforcement with minimal overhead.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -21,15 +21,15 @@
 ├──────────────────────────────────────┼───────────────────────────────────────┤
 │                               KERNEL │                                       │
 │                              ┌───────┴───────┐                               │
-│                              │   LSM Hook    │◄──── execve() blocked here    │
-│                              │ bprm_check    │                               │
+│                              │   LSM Hook    │◄──── open() blocked here      │
+│                              │  file_open    │                               │
 │                              └───────────────┘                               │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Features
 
-- **Kernel-level blocking** - Uses BPF LSM hooks to block executions before they complete
+- **Kernel-level blocking** - Uses BPF LSM hooks to block file opens before they complete
 - **Inode-based rules** - Block by device:inode for reliable identification across renames
 - **Path-based rules** - Block by file path for human-readable policies
 - **Cgroup allowlisting** - Exempt trusted workloads from deny rules
@@ -70,7 +70,7 @@
 │  │                                                                       │   │
 │  │  ┌────────────────┐    ┌────────────────┐    ┌────────────────────┐   │   │
 │  │  │   LSM Hook     │    │   Tracepoint   │    │     BPF Maps       │   │   │
-│  │  │  bprm_check    │    │  sched_exec    │    │                    │   │   │
+│  │  │  file_open     │    │ openat/exec    │    │                    │   │   │
 │  │  │                │    │                │    │  ┌──────────────┐  │   │   │
 │  │  │  ┌──────────┐  │    │  ┌──────────┐  │    │  │ deny_inode   │  │   │   │
 │  │  │  │ ENFORCE  │  │    │  │  AUDIT   │  │    │  │ deny_path    │  │   │   │
@@ -84,7 +84,7 @@
 │                                      │                                       │
 │                                      ▼                                       │
 │                              ┌───────────────┐                               │
-│                              │   execve()    │                               │
+│                              │   open()      │                               │
 │                              └───────────────┘                               │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -97,12 +97,17 @@
 - BPF LSM enabled for enforce mode (check: `cat /sys/kernel/security/lsm | grep bpf`)
 - Cgroup v2 mounted at `/sys/fs/cgroup`
 
+Optional environment check:
+```bash
+scripts/verify_env.sh --strict
+```
+
 ### Install Dependencies (Ubuntu/Debian)
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev \
-    pkg-config cmake ninja-build
+    pkg-config cmake ninja-build python3-jsonschema
 ```
 
 ### Build
@@ -118,7 +123,7 @@ cmake --build build
 # Audit mode (observe without blocking)
 sudo ./build/aegisbpf run --audit
 
-# Enforce mode (block matching executions)
+# Enforce mode (block matching file opens)
 sudo ./build/aegisbpf run --enforce
 
 # With JSON logging
@@ -129,15 +134,15 @@ sudo ./build/aegisbpf run --log-format=json
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Execution Blocking Flow                             │
+│                         File Access Blocking Flow                           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
     User Process                    Kernel                      AegisBPF
          │                            │                            │
-         │  execve("/bin/foo")        │                            │
+         │  open("/etc/shadow")       │                            │
          │ ──────────────────────────►│                            │
          │                            │                            │
-         │                            │  LSM: bprm_check_security  │
+         │                            │  LSM: file_open            │
          │                            │ ──────────────────────────►│
          │                            │                            │
          │                            │    ┌────────────────────┐  │
@@ -152,11 +157,6 @@ sudo ./build/aegisbpf run --log-format=json
          │                            │    └─────────┬──────────┘  │
          │                            │              │             │
          │                            │              ▼ NO          │
-         │                            │    ┌────────────────────┐  │
-         │                            │    │  Check deny_path   │  │
-         │                            │    │    (BLOCKED?)      │  │
-         │                            │    └─────────┬──────────┘  │
-         │                            │              │             │
          │                            │◄─────────────┘             │
          │                            │   Return 0 (allow)         │
          │                            │   or -EPERM (deny)         │
@@ -329,7 +329,7 @@ sudo systemctl enable --now aegisbpf
                     │      BPF LSM Program          │
                     │      (kernel space)           │
                     │                               │
-                    │   execve() ──► check maps     │
+                    │   open() ───► check maps     │
                     │              ──► allow/deny   │
                     └───────────────────────────────┘
 ```
@@ -340,13 +340,13 @@ AegisBPF exports Prometheus-compatible metrics:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `aegisbpf_blocks_total` | counter | Total blocked executions |
+| `aegisbpf_blocks_total` | counter | Total blocked file opens |
 | `aegisbpf_ringbuf_drops_total` | counter | Events dropped due to buffer overflow |
 | `aegisbpf_deny_inode_entries` | gauge | Number of inode deny rules |
 | `aegisbpf_deny_path_entries` | gauge | Number of path deny rules |
 | `aegisbpf_allow_cgroup_entries` | gauge | Number of allowed cgroups |
 | `aegisbpf_blocks_by_cgroup_total` | counter | Blocks per cgroup |
-| `aegisbpf_blocks_by_path_total` | counter | Blocks per path |
+| `aegisbpf_blocks_by_path_total` | counter | Blocks per file path |
 
 ## Security Hardening
 
@@ -421,7 +421,7 @@ sudo reboot
 ## Performance
 
 BPF LSM overhead is minimal:
-- ~100-500ns per execve() call
+- ~100-500ns per file open
 - O(1) hash map lookups
 - Lock-free ring buffer for events
 - ~10MB base memory usage
@@ -435,7 +435,7 @@ ITERATIONS=200000 FILE=/etc/hosts scripts/perf_open_bench.sh
 
 1. Fork the repository
 2. Create a feature branch
-3. Run tests: `cmake --build build && ctest --test-dir build`
+3. Run tests: `scripts/dev_check.sh`
 4. Submit a pull request
 
 ## License

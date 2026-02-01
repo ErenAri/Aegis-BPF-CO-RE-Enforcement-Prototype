@@ -42,6 +42,7 @@ public:
             deny_path_stats = other.deny_path_stats;
             agent_meta = other.agent_meta;
             config_map = other.config_map;
+            survival_allowlist = other.survival_allowlist;
             links = std::move(other.links);
             inode_reused = other.inode_reused;
             deny_path_reused = other.deny_path_reused;
@@ -51,9 +52,11 @@ public:
             deny_inode_stats_reused = other.deny_inode_stats_reused;
             deny_path_stats_reused = other.deny_path_stats_reused;
             agent_meta_reused = other.agent_meta_reused;
+            survival_allowlist_reused = other.survival_allowlist_reused;
 
             // Reset other to prevent double-free
             other.obj = nullptr;
+            other.survival_allowlist = nullptr;
             other.links.clear();
         }
         return *this;
@@ -89,6 +92,10 @@ public:
     bool deny_inode_stats_reused = false;
     bool deny_path_stats_reused = false;
     bool agent_meta_reused = false;
+    bool survival_allowlist_reused = false;
+
+    // Survival allowlist map
+    bpf_map *survival_allowlist = nullptr;
 };
 
 // BPF loading and lifecycle
@@ -112,7 +119,14 @@ Result<void> reset_block_stats_map(bpf_map *map);
 
 // Configuration
 Result<void> set_agent_config(BpfState &state, bool audit_only);
+Result<void> set_agent_config_full(BpfState &state, const AgentConfig &config);
+Result<void> update_deadman_deadline(BpfState &state, uint64_t deadline_ns);
 Result<void> ensure_layout_version(BpfState &state);
+
+// Survival allowlist operations
+Result<void> populate_survival_allowlist(BpfState &state);
+Result<void> add_survival_entry(BpfState &state, const InodeId &id);
+Result<std::vector<InodeId>> read_survival_allowlist(BpfState &state);
 
 // Deny/allow operations
 Result<void> add_deny_inode(BpfState &state, const InodeId &id, DenyEntries &entries);

@@ -10,6 +10,17 @@ Run the health check command to identify issues:
 sudo aegisbpf health
 ```
 
+Optional environment verification:
+```bash
+scripts/verify_env.sh --strict
+```
+
+Smoke tests:
+```bash
+sudo scripts/smoke_enforce.sh
+sudo scripts/smoke_audit_fallback.sh
+```
+
 Expected output for a healthy system:
 ```
 euid: 0

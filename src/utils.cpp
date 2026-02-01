@@ -428,8 +428,9 @@ DenyEntries read_deny_db()
 
 Result<void> write_deny_db(const DenyEntries &entries)
 {
-    if (ensure_db_dir()) {
-        return Error(ErrorCode::IoError, "Failed to create database directory", kDenyDbDir);
+    auto db_result = ensure_db_dir();
+    if (!db_result) {
+        return db_result.error();
     }
     std::ofstream out(kDenyDbPath, std::ios::trunc);
     if (!out.is_open()) {
@@ -454,6 +455,85 @@ std::string build_exec_id(uint32_t pid, uint64_t start_time)
         return {};
     }
     return std::to_string(start_time) + "-" + std::to_string(pid);
+}
+
+bool detect_break_glass()
+{
+    // Check 1: Boot parameter in /proc/cmdline
+    std::string cmdline = read_file_first_line("/proc/cmdline");
+    if (cmdline.find("aegisbpf.break_glass=1") != std::string::npos) {
+        return true;
+    }
+
+    // Check 2: File flag at /etc/aegisbpf/break_glass
+    std::error_code ec;
+    if (std::filesystem::exists(kBreakGlassPath, ec) && !ec) {
+        return true;
+    }
+
+    // Check 3: File flag at /var/lib/aegisbpf/break_glass
+    if (std::filesystem::exists(kBreakGlassVarPath, ec) && !ec) {
+        return true;
+    }
+
+    // Check 4: Signed token (for future signed break-glass)
+    // Token validation will be implemented in Phase 3 with crypto support
+    // For now, just check if the file exists
+    if (std::filesystem::exists(kBreakGlassTokenPath, ec) && !ec) {
+        return true;
+    }
+
+    return false;
+}
+
+Result<std::pair<InodeId, std::string>> canonicalize_path(const std::string &path)
+{
+    if (path.empty()) {
+        return Error(ErrorCode::InvalidArgument, "Path is empty");
+    }
+
+    std::error_code ec;
+    std::filesystem::path resolved = std::filesystem::canonical(path, ec);
+    if (ec) {
+        return Error(ErrorCode::PathResolutionFailed, "Failed to canonicalize path", path + ": " + ec.message());
+    }
+
+    std::string resolved_str = resolved.string();
+
+    struct stat st{};
+    if (stat(resolved_str.c_str(), &st) != 0) {
+        return Error::system(errno, "stat failed for " + resolved_str);
+    }
+
+    InodeId id{};
+    id.ino = st.st_ino;
+    id.dev = static_cast<uint32_t>(st.st_dev);
+
+    return std::make_pair(id, resolved_str);
+}
+
+Result<InodeId> resolve_to_inode(const std::string &path, bool follow_symlinks)
+{
+    if (path.empty()) {
+        return Error(ErrorCode::InvalidArgument, "Path is empty");
+    }
+
+    struct stat st{};
+    int rc;
+    if (follow_symlinks) {
+        rc = stat(path.c_str(), &st);
+    } else {
+        rc = lstat(path.c_str(), &st);
+    }
+
+    if (rc != 0) {
+        return Error::system(errno, "stat failed for " + path);
+    }
+
+    InodeId id{};
+    id.ino = st.st_ino;
+    id.dev = static_cast<uint32_t>(st.st_dev);
+    return id;
 }
 
 } // namespace aegis

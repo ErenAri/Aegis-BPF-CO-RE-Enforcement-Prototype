@@ -26,6 +26,8 @@ Run both passes and report delta (fails if overhead exceeds `MAX_PCT`):
 MAX_PCT=10 ITERATIONS=200000 FILE=/etc/hosts sudo scripts/perf_compare.sh
 ```
 
+CI note: `.github/workflows/perf.yml` runs this check on a labeled self-hosted runner.
+
 ## JSON output
 
 Use `FORMAT=json` and optionally `OUT=/path`:

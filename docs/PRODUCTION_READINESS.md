@@ -40,5 +40,14 @@ deliver each requirement.
 - Structured logging: JSON stdout with optional journald (`--log=journald`)
 - Service hardening: systemd sandboxing and capability bounds in unit file
 - Perf harness: `scripts/perf_open_bench.sh` + `scripts/perf_compare.sh` (see `docs/PERF.md`)
+- Enforce smoke test: `scripts/smoke_enforce.sh`
+- Audit fallback smoke test: `scripts/smoke_audit_fallback.sh`
+- Environment verification: `scripts/verify_env.sh [--strict]`
+- Event schema validation: `scripts/validate_event_schema.py` + `tests/event_samples/`
+- SBOM generation: `sbom` job in `.github/workflows/ci.yml`
+- E2E workflow: `.github/workflows/e2e.yml`
+- Perf regression workflow: `.github/workflows/perf.yml`
+- Kernel matrix workflow: `.github/workflows/kernel-matrix.yml`
+- Nightly fuzz workflow: `.github/workflows/nightly-fuzz.yml`
 - Upgrade/migration runbook: `docs/UPGRADE.md`
 - Incident response runbook: `docs/INCIDENT_RESPONSE.md`

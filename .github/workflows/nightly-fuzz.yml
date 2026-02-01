@@ -1,0 +1,31 @@
+name: Nightly Fuzz
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev pkg-config cmake ninja-build
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S . -B build-fuzz -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_FUZZING=ON -DBUILD_TESTING=OFF -DSKIP_BPF_BUILD=ON
+
+      - name: Build
+        run: cmake --build build-fuzz
+
+      - name: Run fuzzers (short)
+        run: |
+          ./build-fuzz/fuzz_policy -max_total_time=60
+          ./build-fuzz/fuzz_bundle -max_total_time=60

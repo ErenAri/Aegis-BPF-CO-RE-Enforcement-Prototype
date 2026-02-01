@@ -71,6 +71,12 @@ struct path_key {
 
 struct agent_config {
     __u8 audit_only;
+    __u8 deadman_enabled;
+    __u8 break_glass_active;
+    __u8 _pad;
+    __u64 deadman_deadline_ns;  /* ktime_get_boot_ns() deadline */
+    __u32 deadman_ttl_seconds;
+    __u32 _pad2;
 };
 
 struct agent_meta {
@@ -99,6 +105,14 @@ struct {
     __type(key, __u64);
     __type(value, __u8);
 } allow_cgroup_map SEC(".maps");
+
+/* Survival allowlist - critical binaries that can NEVER be blocked */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 256);
+    __type(key, struct inode_id);
+    __type(value, __u8);
+} survival_allowlist SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
@@ -264,11 +278,29 @@ static __always_inline void fill_block_event_process_info(
     }
 }
 
-static __always_inline __u8 get_audit_mode(void)
+static __always_inline __u8 get_effective_audit_mode(void)
 {
     __u32 zero = 0;
     struct agent_config *cfg = bpf_map_lookup_elem(&agent_config_map, &zero);
-    return cfg ? (cfg->audit_only & 1) : 0;
+    if (!cfg)
+        return 1;  /* Fail-open if no config */
+
+    /* Break-glass mode always forces audit */
+    if (cfg->break_glass_active)
+        return 1;
+
+    /* Explicit audit mode */
+    if (cfg->audit_only)
+        return 1;
+
+    /* Deadman switch: if enabled and deadline passed, revert to audit */
+    if (cfg->deadman_enabled) {
+        __u64 now = bpf_ktime_get_boot_ns();
+        if (now > cfg->deadman_deadline_ns)
+            return 1;  /* Deadline passed - failsafe to audit */
+    }
+
+    return 0;  /* Enforce mode */
 }
 
 static __always_inline int is_cgroup_allowed(__u64 cgid)
@@ -330,16 +362,7 @@ int BPF_PROG(handle_file_open, struct file *file)
     if (!file)
         return 0;
 
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u64 cgid = bpf_get_current_cgroup_id();
-    struct task_struct *task = bpf_get_current_task_btf();
-    __u8 audit = get_audit_mode();
-
-    /* Skip allowed cgroups */
-    if (is_cgroup_allowed(cgid))
-        return 0;
-
-    /* Get inode info */
+    /* Get inode info early for survival check */
     const struct inode *inode = BPF_CORE_READ(file, f_inode);
     if (!inode)
         return 0;
@@ -348,6 +371,19 @@ int BPF_PROG(handle_file_open, struct file *file)
         .ino = BPF_CORE_READ(inode, i_ino),
         .dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev),
     };
+
+    /* FIRST: Survival allowlist - always allow critical binaries */
+    if (bpf_map_lookup_elem(&survival_allowlist, &key))
+        return 0;
+
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u64 cgid = bpf_get_current_cgroup_id();
+    struct task_struct *task = bpf_get_current_task_btf();
+    __u8 audit = get_effective_audit_mode();
+
+    /* Skip allowed cgroups */
+    if (is_cgroup_allowed(cgid))
+        return 0;
 
     /* Check if inode is in deny list */
     if (!bpf_map_lookup_elem(&deny_inode_map, &key))

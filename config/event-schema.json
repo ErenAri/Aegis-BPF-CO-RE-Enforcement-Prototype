@@ -11,18 +11,13 @@
   "$defs": {
     "ExecEvent": {
       "type": "object",
-      "description": "Execution event - emitted when a process execution is observed (audit mode)",
-      "required": ["event", "ts", "pid", "ppid", "uid", "gid", "comm", "path"],
+      "description": "Execution event - emitted when a process execution is observed",
+      "required": ["type", "pid", "ppid", "start_time", "cgid", "cgroup_path", "comm"],
       "properties": {
-        "event": {
+        "type": {
           "type": "string",
-          "const": "EXEC",
+          "const": "exec",
           "description": "Event type identifier"
-        },
-        "ts": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Timestamp in nanoseconds since boot (kernel monotonic clock)"
         },
         "pid": {
           "type": "integer",
@@ -34,28 +29,14 @@
           "minimum": 0,
           "description": "Parent process ID"
         },
-        "uid": {
+        "start_time": {
           "type": "integer",
           "minimum": 0,
-          "description": "User ID of the process"
+          "description": "Process start time in kernel ticks or nanoseconds"
         },
-        "gid": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Group ID of the process"
-        },
-        "comm": {
+        "exec_id": {
           "type": "string",
-          "maxLength": 16,
-          "description": "Command name (truncated to 16 characters)"
-        },
-        "path": {
-          "type": "string",
-          "description": "Full path to the executed binary"
-        },
-        "resolved_path": {
-          "type": "string",
-          "description": "Resolved canonical path (if different from path)"
+          "description": "Stable execution identifier (pid:start_time)"
         },
         "cgid": {
           "type": "integer",
@@ -66,71 +47,63 @@
           "type": "string",
           "description": "Full path of the cgroup"
         },
-        "dev": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Device number of the binary"
-        },
-        "ino": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Inode number of the binary"
+        "comm": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Command name (truncated to 16 characters)"
         }
       },
       "additionalProperties": false
     },
     "BlockEvent": {
       "type": "object",
-      "description": "Block event - emitted when an execution is blocked (enforce mode)",
-      "required": ["event", "ts", "pid", "ppid", "uid", "gid", "comm", "path", "reason"],
+      "description": "Block or audit event emitted on denied file open attempts",
+      "required": [
+        "type",
+        "pid",
+        "ppid",
+        "start_time",
+        "parent_start_time",
+        "cgid",
+        "cgroup_path",
+        "ino",
+        "dev",
+        "action",
+        "comm"
+      ],
       "properties": {
-        "event": {
+        "type": {
           "type": "string",
-          "const": "BLOCK",
+          "const": "block",
           "description": "Event type identifier"
-        },
-        "ts": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Timestamp in nanoseconds since boot (kernel monotonic clock)"
         },
         "pid": {
           "type": "integer",
           "minimum": 0,
-          "description": "Process ID that attempted the execution"
+          "description": "Process ID that attempted the access"
         },
         "ppid": {
           "type": "integer",
           "minimum": 0,
           "description": "Parent process ID"
         },
-        "uid": {
+        "start_time": {
           "type": "integer",
           "minimum": 0,
-          "description": "User ID of the process"
+          "description": "Process start time"
         },
-        "gid": {
+        "exec_id": {
+          "type": "string",
+          "description": "Stable execution identifier (pid:start_time)"
+        },
+        "parent_start_time": {
           "type": "integer",
           "minimum": 0,
-          "description": "Group ID of the process"
+          "description": "Parent process start time"
         },
-        "comm": {
+        "parent_exec_id": {
           "type": "string",
-          "maxLength": 16,
-          "description": "Command name of the parent process"
-        },
-        "path": {
-          "type": "string",
-          "description": "Full path to the blocked binary"
-        },
-        "resolved_path": {
-          "type": "string",
-          "description": "Resolved canonical path (if different from path)"
-        },
-        "reason": {
-          "type": "string",
-          "enum": ["deny_inode", "deny_path", "deny_sha256"],
-          "description": "Reason for blocking the execution"
+          "description": "Stable parent execution identifier (ppid:parent_start_time)"
         },
         "cgid": {
           "type": "integer",
@@ -141,15 +114,33 @@
           "type": "string",
           "description": "Full path of the cgroup"
         },
-        "dev": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Device number of the binary"
-        },
         "ino": {
           "type": "integer",
           "minimum": 0,
-          "description": "Inode number of the binary"
+          "description": "Inode number of the file"
+        },
+        "dev": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Device number of the file"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path of the file when available"
+        },
+        "resolved_path": {
+          "type": "string",
+          "description": "Resolved canonical path (if different from path)"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["AUDIT", "KILL"],
+          "description": "Action taken (AUDIT for audit-only, KILL for enforce)"
+        },
+        "comm": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Command name (truncated to 16 characters)"
         }
       },
       "additionalProperties": false
@@ -157,34 +148,31 @@
   },
   "examples": [
     {
-      "event": "EXEC",
-      "ts": 1234567890123456789,
+      "type": "exec",
       "pid": 12345,
       "ppid": 1000,
-      "uid": 1000,
-      "gid": 1000,
-      "comm": "bash",
-      "path": "/usr/bin/ls",
+      "start_time": 123456789,
+      "exec_id": "12345:123456789",
       "cgid": 5678,
       "cgroup_path": "/sys/fs/cgroup/user.slice/user-1000.slice",
-      "dev": 259,
-      "ino": 987654
+      "comm": "bash"
     },
     {
-      "event": "BLOCK",
-      "ts": 1234567890123456789,
+      "type": "block",
       "pid": 12346,
       "ppid": 12345,
-      "uid": 1000,
-      "gid": 1000,
-      "comm": "bash",
-      "path": "/usr/bin/malware",
-      "resolved_path": "/opt/malware/bin/malware",
-      "reason": "deny_path",
+      "start_time": 223456789,
+      "exec_id": "12346:223456789",
+      "parent_start_time": 123456789,
+      "parent_exec_id": "12345:123456789",
       "cgid": 5678,
       "cgroup_path": "/sys/fs/cgroup/user.slice/user-1000.slice",
+      "ino": 123456,
       "dev": 259,
-      "ino": 123456
+      "path": "/etc/shadow",
+      "resolved_path": "/etc/shadow",
+      "action": "KILL",
+      "comm": "cat"
     }
   ]
 }

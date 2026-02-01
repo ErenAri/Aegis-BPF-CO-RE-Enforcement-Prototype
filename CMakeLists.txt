@@ -14,6 +14,7 @@ option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_TESTING "Build tests" ON)
+option(ENABLE_FUZZING "Enable fuzzing targets" OFF)
 option(SKIP_BPF_BUILD "Skip BPF object compilation (for cross-compilation)" OFF)
 
 find_program(CLANG clang REQUIRED)
@@ -125,21 +126,27 @@ endif()
 set(AEGIS_SOURCES
     src/main.cpp
     src/bpf_ops.cpp
+    src/crypto.cpp
     src/events.cpp
+    src/kernel_features.cpp
     src/policy.cpp
     src/seccomp.cpp
     src/sha256.cpp
+    src/tweetnacl.c
     src/utils.cpp
 )
 
 set(AEGIS_HEADERS
     src/bpf_ops.hpp
+    src/crypto.hpp
     src/events.hpp
+    src/kernel_features.hpp
     src/logging.hpp
     src/policy.hpp
     src/result.hpp
     src/seccomp.hpp
     src/sha256.hpp
+    src/tweetnacl.h
     src/types.hpp
     src/utils.hpp
 )
@@ -173,10 +180,13 @@ target_compile_definitions(aegisbpf PRIVATE AEGIS_BPF_OBJ_PATH="${BPF_OBJECT}")
 # Build library for testing (without main)
 set(AEGIS_LIB_SOURCES
     src/bpf_ops.cpp
+    src/crypto.cpp
     src/events.cpp
+    src/kernel_features.cpp
     src/policy.cpp
     src/seccomp.cpp
     src/sha256.cpp
+    src/tweetnacl.c
     src/utils.cpp
 )
 
@@ -205,6 +215,7 @@ if(BUILD_TESTING)
     FetchContent_Declare(
         googletest
         URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+        URL_HASH SHA256=8ad598c73ad796e0d8280b082cebd82a630d73e73cd3c70057938a6501bba5d7
     )
     # For Windows: Prevent overriding the parent project's compiler/linker settings
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -230,10 +241,20 @@ if(BUILD_TESTING)
     include(GoogleTest)
     gtest_discover_tests(aegisbpf_test)
 
+    # E2E bypass tests (require root)
+    add_executable(aegisbpf_bypass_test tests/e2e/test_bypasses.cpp)
+    target_link_libraries(aegisbpf_bypass_test PRIVATE
+        aegisbpf_lib
+        GTest::gtest
+        GTest::gtest_main
+    )
+    target_include_directories(aegisbpf_bypass_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
     # Benchmark tests (optional, for performance regression)
     FetchContent_Declare(
         googlebenchmark
         URL https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz
+        URL_HASH SHA256=6bc180a57d23d4d9515519f92b0c83d61b05b5bab188961f36ac7b06b0d9e9ce
     )
     set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googlebenchmark)
@@ -244,6 +265,33 @@ if(BUILD_TESTING)
         benchmark::benchmark
     )
     target_include_directories(aegisbpf_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(
+        NAME event_schema
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/validate_event_schema.py
+            --schema ${CMAKE_CURRENT_SOURCE_DIR}/config/event-schema.json
+            --samples ${CMAKE_CURRENT_SOURCE_DIR}/tests/event_samples
+    )
+endif()
+
+# Fuzzing targets
+if(ENABLE_FUZZING)
+    message(STATUS "Building fuzzing targets")
+
+    # Policy parser fuzzer
+    add_executable(fuzz_policy tests/fuzz/fuzz_policy_parser.cpp)
+    target_link_libraries(fuzz_policy PRIVATE aegisbpf_lib)
+    target_include_directories(fuzz_policy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(fuzz_policy PRIVATE -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+    target_link_options(fuzz_policy PRIVATE -fsanitize=fuzzer,address)
+
+    # Signed bundle parser fuzzer
+    add_executable(fuzz_bundle tests/fuzz/fuzz_signed_bundle.cpp)
+    target_link_libraries(fuzz_bundle PRIVATE aegisbpf_lib)
+    target_include_directories(fuzz_bundle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(fuzz_bundle PRIVATE -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+    target_link_options(fuzz_bundle PRIVATE -fsanitize=fuzzer,address)
 endif()
 
 # Installation

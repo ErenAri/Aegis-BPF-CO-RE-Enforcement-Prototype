@@ -168,10 +168,12 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
     state.deny_path_stats = bpf_object__find_map_by_name(state.obj, "deny_path_stats");
     state.agent_meta = bpf_object__find_map_by_name(state.obj, "agent_meta_map");
     state.config_map = bpf_object__find_map_by_name(state.obj, "agent_config_map");
+    state.survival_allowlist = bpf_object__find_map_by_name(state.obj, "survival_allowlist");
 
     if (!state.events || !state.deny_inode || !state.deny_path || !state.allow_cgroup ||
         !state.block_stats || !state.deny_cgroup_stats || !state.deny_inode_stats ||
-        !state.deny_path_stats || !state.agent_meta || !state.config_map) {
+        !state.deny_path_stats || !state.agent_meta || !state.config_map ||
+        !state.survival_allowlist) {
         cleanup_bpf(state);
         return Error(ErrorCode::BpfLoadFailed, "Required BPF maps not found in object file");
     }
@@ -194,6 +196,7 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
         TRY(try_reuse(state.deny_inode_stats, kDenyInodeStatsPin, state.deny_inode_stats_reused));
         TRY(try_reuse(state.deny_path_stats, kDenyPathStatsPin, state.deny_path_stats_reused));
         TRY(try_reuse(state.agent_meta, kAgentMetaPin, state.agent_meta_reused));
+        TRY(try_reuse(state.survival_allowlist, kSurvivalAllowlistPin, state.survival_allowlist_reused));
     }
 
     if (!kernel_bpf_lsm_enabled()) {
@@ -212,7 +215,7 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
     bool need_pins = !state.inode_reused || !state.deny_path_reused || !state.cgroup_reused ||
                      !state.block_stats_reused || !state.deny_cgroup_stats_reused ||
                      !state.deny_inode_stats_reused || !state.deny_path_stats_reused ||
-                     !state.agent_meta_reused;
+                     !state.agent_meta_reused || !state.survival_allowlist_reused;
 
     if (need_pins) {
         auto pin_result = ensure_pin_dir();
@@ -240,6 +243,7 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState &state)
         TRY(try_pin(state.deny_inode_stats, kDenyInodeStatsPin, state.deny_inode_stats_reused));
         TRY(try_pin(state.deny_path_stats, kDenyPathStatsPin, state.deny_path_stats_reused));
         TRY(try_pin(state.agent_meta, kAgentMetaPin, state.agent_meta_reused));
+        TRY(try_pin(state.survival_allowlist, kSurvivalAllowlistPin, state.survival_allowlist_reused));
     }
 
     if (attach_links) {
@@ -590,6 +594,140 @@ Result<void> add_allow_cgroup_path(BpfState &state, const std::string &path)
         return cgid_result.error();
     }
     return add_allow_cgroup(state, *cgid_result);
+}
+
+Result<void> set_agent_config_full(BpfState &state, const AgentConfig &config)
+{
+    if (!state.config_map) {
+        return Error(ErrorCode::BpfMapOperationFailed, "Config map not found");
+    }
+
+    uint32_t key = 0;
+    if (bpf_map_update_elem(bpf_map__fd(state.config_map), &key, &config, BPF_ANY)) {
+        return Error::system(errno, "Failed to configure BPF agent config");
+    }
+    return {};
+}
+
+Result<void> update_deadman_deadline(BpfState &state, uint64_t deadline_ns)
+{
+    if (!state.config_map) {
+        return Error(ErrorCode::BpfMapOperationFailed, "Config map not found");
+    }
+
+    uint32_t key = 0;
+    AgentConfig cfg{};
+    int fd = bpf_map__fd(state.config_map);
+
+    // Read current config
+    if (bpf_map_lookup_elem(fd, &key, &cfg)) {
+        return Error::system(errno, "Failed to read agent config");
+    }
+
+    // Update deadline
+    cfg.deadman_deadline_ns = deadline_ns;
+
+    // Write back
+    if (bpf_map_update_elem(fd, &key, &cfg, BPF_ANY)) {
+        return Error::system(errno, "Failed to update deadman deadline");
+    }
+    return {};
+}
+
+// Default critical binaries that should never be blocked
+static const char *kSurvivalBinaries[] = {
+    "/sbin/init",
+    "/lib/systemd/systemd",
+    "/usr/lib/systemd/systemd",
+    "/usr/bin/kubelet",
+    "/usr/local/bin/kubelet",
+    "/usr/sbin/sshd",
+    "/usr/bin/ssh",
+    "/usr/bin/containerd",
+    "/usr/bin/runc",
+    "/usr/bin/crio",
+    "/usr/bin/dockerd",
+    "/usr/bin/apt",
+    "/usr/bin/apt-get",
+    "/usr/bin/dpkg",
+    "/usr/bin/yum",
+    "/usr/bin/dnf",
+    "/usr/bin/rpm",
+    "/bin/sh",
+    "/bin/bash",
+    "/bin/dash",
+    "/usr/bin/bash",
+    "/usr/bin/sudo",
+    "/usr/bin/su",
+    "/sbin/reboot",
+    "/sbin/shutdown",
+    "/usr/sbin/reboot",
+    "/usr/sbin/shutdown",
+    nullptr
+};
+
+Result<void> add_survival_entry(BpfState &state, const InodeId &id)
+{
+    if (!state.survival_allowlist) {
+        return Error(ErrorCode::BpfMapOperationFailed, "Survival allowlist map not found");
+    }
+
+    uint8_t one = 1;
+    if (bpf_map_update_elem(bpf_map__fd(state.survival_allowlist), &id, &one, BPF_ANY)) {
+        return Error::system(errno, "Failed to update survival_allowlist");
+    }
+    return {};
+}
+
+Result<void> populate_survival_allowlist(BpfState &state)
+{
+    if (!state.survival_allowlist) {
+        return Error(ErrorCode::BpfMapOperationFailed, "Survival allowlist map not found");
+    }
+
+    int count = 0;
+    for (int i = 0; kSurvivalBinaries[i] != nullptr; ++i) {
+        const char *path = kSurvivalBinaries[i];
+
+        struct stat st{};
+        if (stat(path, &st) != 0) {
+            // Binary doesn't exist on this system, skip it
+            continue;
+        }
+
+        InodeId id{};
+        id.ino = st.st_ino;
+        id.dev = static_cast<uint32_t>(st.st_dev);
+
+        auto result = add_survival_entry(state, id);
+        if (result) {
+            ++count;
+        }
+    }
+
+    logger().log(SLOG_INFO("Populated survival allowlist")
+        .field("count", static_cast<int64_t>(count)));
+    return {};
+}
+
+Result<std::vector<InodeId>> read_survival_allowlist(BpfState &state)
+{
+    if (!state.survival_allowlist) {
+        return Error(ErrorCode::BpfMapOperationFailed, "Survival allowlist map not found");
+    }
+
+    std::vector<InodeId> entries;
+    int fd = bpf_map__fd(state.survival_allowlist);
+    InodeId key{};
+    InodeId next_key{};
+
+    int rc = bpf_map_get_next_key(fd, nullptr, &key);
+    while (!rc) {
+        entries.push_back(key);
+        rc = bpf_map_get_next_key(fd, &key, &next_key);
+        key = next_key;
+    }
+    return entries;
 }
 
 } // namespace aegis

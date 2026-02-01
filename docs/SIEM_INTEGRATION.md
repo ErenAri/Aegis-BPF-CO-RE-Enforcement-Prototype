@@ -10,32 +10,35 @@ AegisBPF emits events in JSON format to stdout or journald. See [event-schema.js
 
 | Event | Description |
 |-------|-------------|
-| `EXEC` | Process execution observed (audit mode) |
-| `BLOCK` | Process execution blocked (enforce mode) |
+| `exec` | Process execution observed |
+| `block` | File open observed or blocked (audit/enforce) |
 
 ### Common Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `event` | string | Event type (`EXEC` or `BLOCK`) |
-| `ts` | integer | Timestamp (nanoseconds since boot) |
+| `type` | string | Event type (`exec` or `block`) |
 | `pid` | integer | Process ID |
 | `ppid` | integer | Parent process ID |
-| `uid` | integer | User ID |
-| `gid` | integer | Group ID |
-| `comm` | string | Command name (max 16 chars) |
-| `path` | string | Path to executable |
-| `resolved_path` | string | Canonical path (if different) |
+| `start_time` | integer | Process start time (kernel clock) |
+| `exec_id` | string | Stable execution identifier (`pid:start_time`) |
 | `cgid` | integer | Cgroup ID |
 | `cgroup_path` | string | Cgroup path |
-| `dev` | integer | Device number |
-| `ino` | integer | Inode number |
+| `comm` | string | Command name (max 16 chars) |
 
 ### Block-specific Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `reason` | string | Block reason: `deny_inode`, `deny_path`, `deny_sha256` |
+| `parent_start_time` | integer | Parent process start time |
+| `parent_exec_id` | string | Stable parent execution identifier |
+| `ino` | integer | Inode number |
+| `dev` | integer | Device number |
+| `path` | string | Path of the file when available |
+| `resolved_path` | string | Canonical path (if different) |
+| `action` | string | `AUDIT` (audit-only) or `KILL` (enforce) |
+
+Note: when enforcement is inode-based, `path` may be empty; use `ino` + `dev` for correlation.
 
 ## Splunk Integration
 
@@ -74,21 +77,20 @@ AegisBPF emits events in JSON format to stdout or journald. See [event-schema.js
 For Splunk CEF ingestion, transform AegisBPF events to CEF:
 
 ```
-CEF:0|AegisBPF|AegisBPF|1.0|BLOCK|Execution Blocked|7|src=<uid> dst=<path> dproc=<comm> msg=<reason> cn1=<pid> cn1Label=pid cn2=<ppid> cn2Label=ppid cs1=<cgroup_path> cs1Label=cgroup
+CEF:0|AegisBPF|AegisBPF|1.0|BLOCK|File Access Blocked|7|dst=<path> dproc=<comm> msg=<action> cn1=<pid> cn1Label=pid cn2=<ppid> cn2Label=ppid cs1=<cgroup_path> cs1Label=cgroup
 ```
 
 Field mapping:
 
 | CEF Field | AegisBPF Field |
 |-----------|----------------|
-| `src` | `uid` |
 | `dst` | `path` |
 | `dproc` | `comm` |
-| `msg` | `reason` |
+| `msg` | `action` |
 | `cn1` | `pid` |
 | `cn2` | `ppid` |
 | `cs1` | `cgroup_path` |
-| `deviceCustomDate1` | `ts` (converted to datetime) |
+| `deviceCustomDate1` | `start_time` (converted to datetime if desired) |
 
 ## Elastic (ELK) Integration
 
@@ -106,11 +108,6 @@ processors:
       fields: ["message"]
       target: "aegisbpf"
       overwrite_keys: true
-  - timestamp:
-      field: aegisbpf.ts
-      layouts:
-        - UNIX_NS
-      target_field: "@timestamp"
 
 output.elasticsearch:
   hosts: ["https://elasticsearch:9200"]
@@ -129,16 +126,17 @@ output.elasticsearch:
     },
     "mappings": {
       "properties": {
-        "event": { "type": "keyword" },
-        "ts": { "type": "date", "format": "epoch_millis" },
+        "type": { "type": "keyword" },
+        "start_time": { "type": "long" },
+        "exec_id": { "type": "keyword" },
+        "parent_start_time": { "type": "long" },
+        "parent_exec_id": { "type": "keyword" },
         "pid": { "type": "integer" },
         "ppid": { "type": "integer" },
-        "uid": { "type": "integer" },
-        "gid": { "type": "integer" },
         "comm": { "type": "keyword" },
         "path": { "type": "keyword" },
         "resolved_path": { "type": "keyword" },
-        "reason": { "type": "keyword" },
+        "action": { "type": "keyword" },
         "cgid": { "type": "long" },
         "cgroup_path": { "type": "keyword" },
         "dev": { "type": "integer" },
@@ -160,7 +158,7 @@ Example detection rule for suspicious activity:
   "risk_score": 70,
   "severity": "high",
   "type": "threshold",
-  "query": "event.type:BLOCK",
+  "query": "aegisbpf.type:block",
   "threshold": {
     "field": ["host.name"],
     "value": 100
@@ -195,7 +193,7 @@ if $programname == 'aegisbpf' then {
 
 Example:
 ```
-<134>1 2024-01-15T10:30:00.000Z server1 aegisbpf - - - {"event":"BLOCK","ts":1234567890123456789,"pid":12345,"ppid":1000,"uid":1000,"gid":1000,"comm":"bash","path":"/usr/bin/malware","reason":"deny_path"}
+<134>1 2024-01-15T10:30:00.000Z server1 aegisbpf - - - {"type":"block","pid":12345,"ppid":1000,"start_time":123456789,"cgid":5678,"cgroup_path":"/sys/fs/cgroup/user.slice/user-1000.slice","comm":"bash","path":"/usr/bin/malware","action":"KILL","ino":123456,"dev":259}
 ```
 
 ## Prometheus/Grafana Integration
@@ -218,13 +216,13 @@ See [prometheus/alerts.yml](../config/prometheus/alerts.yml) for alert rules and
 ```xml
 <device_extension>
   <pattern id="aegisbpf_block"
-           regex="\"event\":\"BLOCK\".*\"pid\":(\d+).*\"path\":\"([^\"]+)\".*\"reason\":\"([^\"]+)\""
-           capture_groups="pid,path,reason">
-    <event name="Execution Blocked" category="Security" severity="high"/>
+           regex="\"type\":\"block\".*\"pid\":(\d+).*\"path\":\"([^\"]+)\".*\"action\":\"([^\"]+)\""
+           capture_groups="pid,path,action">
+    <event name="File Access Blocked" category="Security" severity="high"/>
   </pattern>
   <pattern id="aegisbpf_exec"
-           regex="\"event\":\"EXEC\".*\"pid\":(\d+).*\"path\":\"([^\"]+)\""
-           capture_groups="pid,path">
+           regex="\"type\":\"exec\".*\"pid\":(\d+)"
+           capture_groups="pid">
     <event name="Execution Observed" category="Audit" severity="low"/>
   </pattern>
 </device_extension>
@@ -236,7 +234,7 @@ See [prometheus/alerts.yml](../config/prometheus/alerts.yml) for alert rules and
 |---------------|------------|
 | AegisBPF PID | `\"pid\":(\d+)` |
 | AegisBPF Path | `\"path\":\"([^\"]+)\"` |
-| AegisBPF Reason | `\"reason\":\"([^\"]+)\"` |
+| AegisBPF Action | `\"action\":\"([^\"]+)\"` |
 | AegisBPF Cgroup | `\"cgroup_path\":\"([^\"]+)\"` |
 
 ## Security Onion Integration
@@ -255,7 +253,7 @@ filter {
       add_field => { "[@metadata][index]" => "so-aegisbpf" }
     }
 
-    if [aegisbpf][event] == "BLOCK" {
+    if [aegisbpf][type] == "block" {
       mutate {
         add_tag => ["alert", "execution_blocked"]
       }
@@ -276,8 +274,8 @@ filter {
 
 <decoder name="aegisbpf-block">
   <parent>aegisbpf</parent>
-  <regex>"event":"BLOCK".*"pid":(\d+).*"path":"([^"]+)".*"reason":"(\w+)"</regex>
-  <order>pid,path,reason</order>
+  <regex>"type":"block".*"pid":(\d+).*"path":"([^"]+)".*"action":"(\w+)"</regex>
+  <order>pid,path,action</order>
 </decoder>
 ```
 
@@ -294,8 +292,8 @@ filter {
 
   <rule id="100002" level="12">
     <if_sid>100001</if_sid>
-    <field name="reason">deny_sha256</field>
-    <description>AegisBPF: Known malware blocked - $(path)</description>
+    <field name="action">KILL</field>
+    <description>AegisBPF: File access blocked - $(path)</description>
     <group>malware,</group>
   </rule>
 </group>
@@ -303,12 +301,12 @@ filter {
 
 ## Timestamp Conversion
 
-AegisBPF timestamps are in nanoseconds since boot (kernel monotonic clock). To convert to wall-clock time:
+AegisBPF emits process `start_time` values (kernel monotonic clock). Use the ingest timestamp for event time, or convert `start_time` if you need a stable process timeline:
 
 ```python
 import time
 
-def convert_ts(boot_ns):
+def convert_start_time(boot_ns):
     """Convert kernel boot timestamp to wall-clock time."""
     # Read boot time from /proc/stat
     with open('/proc/stat') as f:

@@ -27,17 +27,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prometheus alert rules
 - Grafana dashboard
 - JSON Schema for event validation
+- Event schema validation tests and sample payloads
 - SIEM integration documentation
 - Dockerfile for containerized deployment
 - Helm chart for Kubernetes deployment
 - Architecture documentation
 - Troubleshooting guide
 - Man page
+- Dev check and environment verification scripts
+- Enforce-mode smoke test script
+- Nightly fuzz workflow, perf regression workflow, and kernel matrix workflow
 
 ### Changed
 - All functions now return Result<T> instead of int/bool
 - Replaced std::cerr/std::cout with structured logging
 - Improved error messages with context
+- Event schema aligned with emitted JSON fields
+- README/architecture diagrams updated to file-open enforcement
 
 ### Fixed
 - popen() file descriptor leak in kernel config check

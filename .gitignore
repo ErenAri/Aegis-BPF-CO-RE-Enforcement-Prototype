@@ -1,8 +1,17 @@
 .idea/
 /build/
+/build-asan/
+/build-coverage/
+/build-fuzz/
+/build-tsan/
+/build-ubsan/
 /cmake-build*/
 *.bpf.o
 *.skel.h
 vmlinux.h
 /aegisbpf
 *.o
+coverage*.html
+coverage.xml
+coverage.css
+coverage.js

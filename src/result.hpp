@@ -42,6 +42,13 @@ enum class ErrorCode {
     // Configuration errors
     ConfigInvalid,
     LayoutVersionMismatch,
+
+    // Crypto/signing errors
+    CryptoError,
+    SignatureInvalid,
+    IntegrityCheckFailed,
+    PolicyExpired,
+    PolicyRollback,
 };
 
 /**
