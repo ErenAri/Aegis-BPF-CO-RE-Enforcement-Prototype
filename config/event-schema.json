@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aegisbpf/aegisbpf/blob/main/config/event-schema.json",
+  "title": "AegisBPF Event Schema",
+  "description": "JSON Schema for AegisBPF security events",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/ExecEvent" },
+    { "$ref": "#/$defs/BlockEvent" }
+  ],
+  "$defs": {
+    "ExecEvent": {
+      "type": "object",
+      "description": "Execution event - emitted when a process execution is observed (audit mode)",
+      "required": ["event", "ts", "pid", "ppid", "uid", "gid", "comm", "path"],
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "EXEC",
+          "description": "Event type identifier"
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Timestamp in nanoseconds since boot (kernel monotonic clock)"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Process ID of the executed process"
+        },
+        "ppid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Parent process ID"
+        },
+        "uid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "User ID of the process"
+        },
+        "gid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Group ID of the process"
+        },
+        "comm": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Command name (truncated to 16 characters)"
+        },
+        "path": {
+          "type": "string",
+          "description": "Full path to the executed binary"
+        },
+        "resolved_path": {
+          "type": "string",
+          "description": "Resolved canonical path (if different from path)"
+        },
+        "cgid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cgroup ID (inode number of cgroup directory)"
+        },
+        "cgroup_path": {
+          "type": "string",
+          "description": "Full path of the cgroup"
+        },
+        "dev": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Device number of the binary"
+        },
+        "ino": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Inode number of the binary"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BlockEvent": {
+      "type": "object",
+      "description": "Block event - emitted when an execution is blocked (enforce mode)",
+      "required": ["event", "ts", "pid", "ppid", "uid", "gid", "comm", "path", "reason"],
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "BLOCK",
+          "description": "Event type identifier"
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Timestamp in nanoseconds since boot (kernel monotonic clock)"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Process ID that attempted the execution"
+        },
+        "ppid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Parent process ID"
+        },
+        "uid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "User ID of the process"
+        },
+        "gid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Group ID of the process"
+        },
+        "comm": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Command name of the parent process"
+        },
+        "path": {
+          "type": "string",
+          "description": "Full path to the blocked binary"
+        },
+        "resolved_path": {
+          "type": "string",
+          "description": "Resolved canonical path (if different from path)"
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["deny_inode", "deny_path", "deny_sha256"],
+          "description": "Reason for blocking the execution"
+        },
+        "cgid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cgroup ID (inode number of cgroup directory)"
+        },
+        "cgroup_path": {
+          "type": "string",
+          "description": "Full path of the cgroup"
+        },
+        "dev": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Device number of the binary"
+        },
+        "ino": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Inode number of the binary"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "event": "EXEC",
+      "ts": 1234567890123456789,
+      "pid": 12345,
+      "ppid": 1000,
+      "uid": 1000,
+      "gid": 1000,
+      "comm": "bash",
+      "path": "/usr/bin/ls",
+      "cgid": 5678,
+      "cgroup_path": "/sys/fs/cgroup/user.slice/user-1000.slice",
+      "dev": 259,
+      "ino": 987654
+    },
+    {
+      "event": "BLOCK",
+      "ts": 1234567890123456789,
+      "pid": 12346,
+      "ppid": 12345,
+      "uid": 1000,
+      "gid": 1000,
+      "comm": "bash",
+      "path": "/usr/bin/malware",
+      "resolved_path": "/opt/malware/bin/malware",
+      "reason": "deny_path",
+      "cgid": 5678,
+      "cgroup_path": "/sys/fs/cgroup/user.slice/user-1000.slice",
+      "dev": 259,
+      "ino": 123456
+    }
+  ]
+}

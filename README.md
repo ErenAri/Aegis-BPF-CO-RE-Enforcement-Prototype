@@ -1,219 +1,443 @@
 # AegisBPF
 
-eBPF LSM agent that enforces inode-based deny rules in `lsm/file_open`, kills offenders synchronously (SIGKILL + `-EPERM`), and exempts trusted workloads via cgroup-based allowlisting. Events are emitted over a ring buffer and per-CPU counters track blocks and ringbuf drops.
-
-## Requirements
-
-- Kernel with BPF LSM, cgroup v2 (unified hierarchy mounted at `/sys/fs/cgroup`), bpffs at `/sys/fs/bpf`, and BTF at `/sys/kernel/btf/vmlinux`.
-- Verify `/sys/kernel/security/lsm` contains `bpf`; otherwise BPF LSM hooks will not fire.
-- If `bpf` is missing from `/sys/kernel/security/lsm`, enable it by adding `bpf` to the kernel `lsm=` boot parameter (e.g., `lsm=landlock,lockdown,yama,bpf,integrity,apparmor`) or rebuilding with `CONFIG_BPF_LSM=y`.
-- Root privileges (CAP_SYS_ADMIN) to load LSM programs and manage cgroups.
-- Optional: `libsystemd-dev` to enable journald logging for events.
-- Ubuntu build deps:
-  ```
-  sudo apt-get update
-  sudo apt-get install -y clang llvm libbpf-dev bpftool libelf-dev zlib1g-dev libzstd-dev pkg-config cmake make g++ linux-headers-$(uname -r)
-  ```
-
-See `docs/PRODUCTION_READINESS.md` for the full production checklist. Operational
-runbooks are in `docs/UPGRADE.md` and `docs/INCIDENT_RESPONSE.md`.
-
-## Build
+**AegisBPF** is an eBPF-based runtime security agent that monitors and blocks unauthorized process executions using Linux Security Modules (LSM). It provides kernel-level enforcement with minimal overhead.
 
 ```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              AegisBPF                                        │
+│                                                                              │
+│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐   │
+│   │   Block     │    │   Allow     │    │   Policy    │    │  Metrics    │   │
+│   │  deny list  │    │  allowlist  │    │  management │    │  & stats    │   │
+│   └──────┬──────┘    └──────┬──────┘    └──────┬──────┘    └──────┬──────┘   │
+│          │                  │                  │                  │          │
+│          └──────────────────┴──────────────────┴──────────────────┘          │
+│                                      │                                       │
+│                              ┌───────┴───────┐                               │
+│                              │  BPF Maps     │                               │
+│                              │  (pinned)     │                               │
+│                              └───────┬───────┘                               │
+│                                      │                                       │
+├──────────────────────────────────────┼───────────────────────────────────────┤
+│                               KERNEL │                                       │
+│                              ┌───────┴───────┐                               │
+│                              │   LSM Hook    │◄──── execve() blocked here    │
+│                              │ bprm_check    │                               │
+│                              └───────────────┘                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Features
+
+- **Kernel-level blocking** - Uses BPF LSM hooks to block executions before they complete
+- **Inode-based rules** - Block by device:inode for reliable identification across renames
+- **Path-based rules** - Block by file path for human-readable policies
+- **Cgroup allowlisting** - Exempt trusted workloads from deny rules
+- **Audit mode** - Monitor without blocking (works without BPF LSM)
+- **Prometheus metrics** - Export block counts and statistics
+- **Structured logging** - JSON or text output to stdout/journald
+- **Policy files** - Declarative configuration with SHA256 verification
+- **Kubernetes ready** - Helm chart for DaemonSet deployment
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                User Space                                    │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                         aegisbpf daemon                                 │ │
+│  │                                                                         │ │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │ │
+│  │  │  CLI     │  │  Policy  │  │  Event   │  │ Metrics  │  │ Logging  │   │ │
+│  │  │ Parser   │  │ Manager  │  │ Handler  │  │ Exporter │  │ (JSON)   │   │ │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │ │
+│  │       │             │             │             │             │         │ │
+│  │       └─────────────┴─────────────┴─────────────┴─────────────┘         │ │
+│  │                                   │                                     │ │
+│  │                           ┌───────┴───────┐                             │ │
+│  │                           │    libbpf     │                             │ │
+│  │                           └───────┬───────┘                             │ │
+│  └───────────────────────────────────┼─────────────────────────────────────┘ │
+│                                      │                                       │
+│                              bpf() syscall                                   │
+│                                      │                                       │
+├──────────────────────────────────────┼───────────────────────────────────────┤
+│                                Kernel Space                                  │
+│                                      │                                       │
+│  ┌───────────────────────────────────┴───────────────────────────────────┐   │
+│  │                          BPF Subsystem                                │   │
+│  │                                                                       │   │
+│  │  ┌────────────────┐    ┌────────────────┐    ┌────────────────────┐   │   │
+│  │  │   LSM Hook     │    │   Tracepoint   │    │     BPF Maps       │   │   │
+│  │  │  bprm_check    │    │  sched_exec    │    │                    │   │   │
+│  │  │                │    │                │    │  ┌──────────────┐  │   │   │
+│  │  │  ┌──────────┐  │    │  ┌──────────┐  │    │  │ deny_inode   │  │   │   │
+│  │  │  │ ENFORCE  │  │    │  │  AUDIT   │  │    │  │ deny_path    │  │   │   │
+│  │  │  │  MODE    │  │    │  │  MODE    │  │    │  │ allow_cgroup │  │   │   │
+│  │  │  └──────────┘  │    │  └──────────┘  │    │  │ events (rb)  │  │   │   │
+│  │  └───────┬────────┘    └───────┬────────┘    │  │ block_stats  │  │   │   │
+│  │          │                     │             │  └──────────────┘  │   │   │
+│  │          │     Ring Buffer     │             │                    │   │   │
+│  │          └─────────────────────┴─────────────┴────────────────────┘   │   │
+│  └───────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                       │
+│                                      ▼                                       │
+│                              ┌───────────────┐                               │
+│                              │   execve()    │                               │
+│                              └───────────────┘                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Quick Start
+
+### Prerequisites
+
+- Linux kernel 5.8+ with BTF support
+- BPF LSM enabled for enforce mode (check: `cat /sys/kernel/security/lsm | grep bpf`)
+- Cgroup v2 mounted at `/sys/fs/cgroup`
+
+### Install Dependencies (Ubuntu/Debian)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev \
+    pkg-config cmake ninja-build
+```
+
+### Build
+
+```bash
 cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
-## Install (optional)
+### Run
 
-```
-sudo cmake --build build --target install
-```
-
-Installed files:
-- Binary: `/usr/bin/aegisbpf`
-- BPF object: `/usr/lib/aegisbpf/aegis.bpf.o`
-- Systemd unit: `/usr/lib/systemd/system/aegisbpf.service`
-- Env file: `/etc/default/aegisbpf`
-- Policy example: `/etc/aegisbpf/policy.example`
-
-## Package (CPack)
-
-```
-cd build
-cpack -G TGZ
-# Optional (requires dpkg-deb)
-cpack -G DEB
-# Optional (requires rpmbuild)
-cpack -G RPM
-```
-
-## Arm64 CI (QEMU)
-
-The CI workflow includes an arm64 build lane using QEMU and Docker. To reproduce
-locally:
-
-```
-docker run --rm --platform linux/arm64 \
-  -v "$PWD":/src \
-  -v /sys:/sys:ro \
-  -w /src \
-  ubuntu:24.04 \
-  bash -lc "apt-get update && apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build && cmake -S . -B build-arm64 -G Ninja && cmake --build build-arm64"
-```
-
-## Run the agent
-
-```
-sudo ./build/aegisbpf run
-# Audit-only (log without kill/EPERM)
+```bash
+# Audit mode (observe without blocking)
 sudo ./build/aegisbpf run --audit
-# Send events to journald instead of stdout (requires libsystemd-dev at build time)
-sudo ./build/aegisbpf run --log=journald
+
+# Enforce mode (block matching executions)
+sudo ./build/aegisbpf run --enforce
+
+# With JSON logging
+sudo ./build/aegisbpf run --log-format=json
 ```
 
-The agent loads its BPF object from the build path by default. For installed
-setups it falls back to `/usr/lib/aegisbpf/aegis.bpf.o`. Override with
-`AEGIS_BPF_OBJ=/path/to/aegis.bpf.o` if needed.
-
-If BPF LSM is not enabled, the agent automatically falls back to tracepoint audit-only mode
-(no enforcement). In that mode, file access auditing matches raw `openat` path strings and
-may not resolve relative paths.
-
-Startup does the following:
-- Verifies cgroup v2 and bpffs mounts.
-- Loads BPF and pins maps under `/sys/fs/bpf/aegisbpf`.
-- Creates `/sys/fs/cgroup/aegis_agent`, moves the agent PID into it, and allows that cgroup via `allow_cgroup_map`.
-- Attaches `lsm/path_open` (enforcement) plus fork/exit/exec lineage tracking.
-
-## Manage deny rules (inode/device based)
+## How It Works
 
 ```
-sudo ./build/aegisbpf block add /etc/shadow
-sudo ./build/aegisbpf block list
-sudo ./build/aegisbpf block del /etc/shadow
-sudo ./build/aegisbpf block clear   # clears pins and DB, resets counters
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Execution Blocking Flow                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    User Process                    Kernel                      AegisBPF
+         │                            │                            │
+         │  execve("/bin/foo")        │                            │
+         │ ──────────────────────────►│                            │
+         │                            │                            │
+         │                            │  LSM: bprm_check_security  │
+         │                            │ ──────────────────────────►│
+         │                            │                            │
+         │                            │    ┌────────────────────┐  │
+         │                            │    │ Check allow_cgroup │  │
+         │                            │    │     (ALLOWED?)     │  │
+         │                            │    └─────────┬──────────┘  │
+         │                            │              │             │
+         │                            │              ▼ NO          │
+         │                            │    ┌────────────────────┐  │
+         │                            │    │  Check deny_inode  │  │
+         │                            │    │    (BLOCKED?)      │  │
+         │                            │    └─────────┬──────────┘  │
+         │                            │              │             │
+         │                            │              ▼ NO          │
+         │                            │    ┌────────────────────┐  │
+         │                            │    │  Check deny_path   │  │
+         │                            │    │    (BLOCKED?)      │  │
+         │                            │    └─────────┬──────────┘  │
+         │                            │              │             │
+         │                            │◄─────────────┘             │
+         │                            │   Return 0 (allow)         │
+         │                            │   or -EPERM (deny)         │
+         │                            │                            │
+         │  Success / EPERM           │                            │
+         │ ◄──────────────────────────│                            │
+         │                            │                            │
 ```
 
-In tracepoint audit fallback, path matching uses raw `openat` strings. Use absolute paths to
-avoid mismatches; the agent stores both the canonical path and the raw input string.
+## Usage
 
-State is persisted in:
-- `/sys/fs/bpf/aegisbpf/deny_inode`
-- `/sys/fs/bpf/aegisbpf/deny_path`
-- `/sys/fs/bpf/aegisbpf/allow_cgroup`
-- `/sys/fs/bpf/aegisbpf/block_stats`
-- `/sys/fs/bpf/aegisbpf/deny_cgroup_stats`
-- `/sys/fs/bpf/aegisbpf/deny_inode_stats`
-- `/sys/fs/bpf/aegisbpf/deny_path_stats`
-- `/sys/fs/bpf/aegisbpf/agent_meta`
-- `/var/lib/aegisbpf/deny.db` (dev/ino + optional path notes)
+### Block Commands
 
-## Manage allowlist (cgroup based)
+```bash
+# Add file to deny list
+sudo aegisbpf block add /usr/bin/malware
 
-```
-sudo ./build/aegisbpf allow add /sys/fs/cgroup/my_service
-sudo ./build/aegisbpf allow list
-sudo ./build/aegisbpf allow del /sys/fs/cgroup/my_service
+# List all blocked entries
+sudo aegisbpf block list
+
+# Remove from deny list
+sudo aegisbpf block del /usr/bin/malware
+
+# Clear all rules and statistics
+sudo aegisbpf block clear
 ```
 
-## Policy file
+### Allow Commands
 
-Use policy files for repeatable rule sets (see `docs/POLICY.md`).
+```bash
+# Allow cgroup (processes bypass deny rules)
+sudo aegisbpf allow add /sys/fs/cgroup/system.slice
 
-```
-sudo ./build/aegisbpf policy lint config/policy.example
-sudo ./build/aegisbpf policy apply config/policy.example --reset
-sudo ./build/aegisbpf policy apply config/policy.example --sha256 <hex>
-sudo ./build/aegisbpf policy apply config/policy.example --sha256-file /etc/aegisbpf/policy.sha256
-sudo ./build/aegisbpf policy export /tmp/aegis.policy
-sudo ./build/aegisbpf policy show
-sudo ./build/aegisbpf policy rollback
-```
+# List allowed cgroups
+sudo aegisbpf allow list
 
-`policy apply` is additive by default; use `--reset` to clear deny/allow maps and
-counters before applying. `deny_path` entries must exist at apply time.
-You can enforce integrity with `--sha256`, `--sha256-file`, or via
-`AEGIS_POLICY_SHA256`/`AEGIS_POLICY_SHA256_FILE`.
-`policy rollback` applies the previous policy stored at
-`/var/lib/aegisbpf/policy.applied.prev`.
-By default, `policy apply` will roll back to the last applied policy if the
-apply fails; use `--no-rollback` to disable.
-
-## Health check
-
-```
-./build/aegisbpf health
+# Remove from allowlist
+sudo aegisbpf allow del /sys/fs/cgroup/system.slice
 ```
 
-This reports prerequisite status (cgroup v2, bpffs, BTF, BPF LSM) and pin
-availability.
+### Policy Files
 
-## Systemd packaging
+```ini
+# /etc/aegisbpf/policy.conf
+version=1
 
-Baseline units live in `packaging/systemd/`:
-- `packaging/systemd/aegisbpf.service`
-- `packaging/systemd/aegisbpf.env`
+[deny_path]
+/usr/bin/dangerous
+/opt/malware/binary
 
-Edit `/etc/default/aegisbpf` and set `AEGIS_POLICY` to your policy file path
-(for example `/etc/aegisbpf/policy.conf`). The default points at
-`/etc/aegisbpf/policy.example`. Set `AEGIS_LOG` to `--log=journald` if you want
-events written to the journal.
-Set `AEGIS_SMOKE_TEST=1` to run `aegisbpf health` after service start.
-Set `AEGIS_POLICY_SHA256` or `AEGIS_POLICY_SHA256_FILE` to enforce policy
-integrity checks in the service.
-The unit uses systemd hardening (ProtectSystem, capability bounds, etc.); if it
-blocks your environment, adjust `packaging/systemd/aegisbpf.service`.
+[deny_inode]
+259:12345
 
-If you install with a non-default `CMAKE_INSTALL_PREFIX`, update
-`packaging/systemd/aegisbpf.service` to point at the correct binary path.
-
-## Stats
-
-```
-sudo ./build/aegisbpf stats
+[allow_cgroup]
+/sys/fs/cgroup/system.slice
+cgid:123456
 ```
 
-Outputs counts of deny inode/path/allow entries plus per-CPU aggregated `blocks` and `ringbuf_drops`, and per-cgroup/per-inode/per-path block counters (with best-effort cgroup path resolution).
+```bash
+# Validate policy
+sudo aegisbpf policy lint /etc/aegisbpf/policy.conf
+
+# Apply with SHA256 verification
+sudo aegisbpf policy apply /etc/aegisbpf/policy.conf --sha256 abc123...
+
+# Export current rules
+sudo aegisbpf policy export /tmp/current.conf
+
+# Rollback to previous policy
+sudo aegisbpf policy rollback
+```
+
+### Monitoring
+
+```bash
+# View statistics
+sudo aegisbpf stats
+
+# Export Prometheus metrics
+sudo aegisbpf metrics --out /var/lib/prometheus/aegisbpf.prom
+
+# Health check
+sudo aegisbpf health
+```
+
+## Event Format
+
+Events are emitted as newline-delimited JSON:
+
+```json
+{
+  "event": "BLOCK",
+  "ts": 1234567890123456789,
+  "pid": 12345,
+  "ppid": 1000,
+  "uid": 1000,
+  "gid": 1000,
+  "comm": "bash",
+  "path": "/usr/bin/malware",
+  "reason": "deny_path",
+  "cgid": 5678,
+  "cgroup_path": "/sys/fs/cgroup/user.slice"
+}
+```
+
+## Deployment
+
+### Docker
+
+```bash
+docker build -t aegisbpf .
+docker run --privileged --pid=host \
+    -v /sys/fs/bpf:/sys/fs/bpf \
+    -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
+    -v /sys/kernel/btf:/sys/kernel/btf:ro \
+    aegisbpf run --audit
+```
+
+### Kubernetes (Helm)
+
+```bash
+helm install aegisbpf ./helm/aegisbpf \
+    --set agent.auditMode=false \
+    --set agent.logFormat=json
+```
+
+### Systemd
+
+```bash
+sudo cmake --install build
+sudo systemctl enable --now aegisbpf
+```
+
+## Data Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Data Flow                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                    ┌─────────────────────────────────┐
+                    │         Policy File             │
+                    │   /etc/aegisbpf/policy.conf     │
+                    └───────────────┬─────────────────┘
+                                    │
+                                    ▼
+┌───────────────┐           ┌───────────────┐           ┌───────────────┐
+│    CLI        │           │   aegisbpf    │           │   journald    │
+│   Commands    │──────────►│    daemon     │──────────►│   / stdout    │
+│               │           │               │           │               │
+└───────────────┘           └───────┬───────┘           └───────────────┘
+                                    │
+                                    │ bpf() syscall
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │         BPF Maps              │
+                    │   /sys/fs/bpf/aegis/          │
+                    │                               │
+                    │  ┌─────────────────────────┐  │
+                    │  │ deny_inode   (hash map) │  │
+                    │  │ deny_path    (hash map) │  │
+                    │  │ allow_cgroup (hash map) │  │
+                    │  │ events       (ring buf) │  │
+                    │  │ block_stats  (array)    │  │
+                    │  └─────────────────────────┘  │
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │      BPF LSM Program          │
+                    │      (kernel space)           │
+                    │                               │
+                    │   execve() ──► check maps     │
+                    │              ──► allow/deny   │
+                    └───────────────────────────────┘
+```
 
 ## Metrics
 
-Prometheus text output (stdout or file):
+AegisBPF exports Prometheus-compatible metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `aegisbpf_blocks_total` | counter | Total blocked executions |
+| `aegisbpf_ringbuf_drops_total` | counter | Events dropped due to buffer overflow |
+| `aegisbpf_deny_inode_entries` | gauge | Number of inode deny rules |
+| `aegisbpf_deny_path_entries` | gauge | Number of path deny rules |
+| `aegisbpf_allow_cgroup_entries` | gauge | Number of allowed cgroups |
+| `aegisbpf_blocks_by_cgroup_total` | counter | Blocks per cgroup |
+| `aegisbpf_blocks_by_path_total` | counter | Blocks per path |
+
+## Security Hardening
 
 ```
-sudo ./build/aegisbpf metrics
-sudo ./build/aegisbpf metrics --out /var/lib/aegisbpf/metrics.prom
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Security Layers                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                         Layer 4: Code Signing                       │
+    │                    Sigstore/Cosign + SBOM                           │
+    └─────────────────────────────────────────────────────────────────────┘
+                                    │
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                         Layer 3: MAC Policies                       │
+    │                    AppArmor / SELinux                               │
+    └─────────────────────────────────────────────────────────────────────┘
+                                    │
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                         Layer 2: Seccomp                            │
+    │                    Syscall allowlist (--seccomp)                    │
+    └─────────────────────────────────────────────────────────────────────┘
+                                    │
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                         Layer 1: Capabilities                       │
+    │              CAP_SYS_ADMIN, CAP_BPF, CAP_PERFMON                    │
+    └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Performance harness
-
-A simple open/close micro-benchmark is in `docs/PERF.md`:
-
+Enable all hardening layers:
+```bash
+sudo aegisbpf run --enforce --seccomp
 ```
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening details.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and internals |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |
+| [SIEM_INTEGRATION.md](docs/SIEM_INTEGRATION.md) | Splunk, ELK, QRadar integration |
+| [CHANGELOG.md](docs/CHANGELOG.md) | Version history |
+| [aegisbpf.1.md](docs/man/aegisbpf.1.md) | Man page |
+
+## Requirements
+
+- Linux kernel 5.8+ with:
+  - `CONFIG_BPF=y`
+  - `CONFIG_BPF_SYSCALL=y`
+  - `CONFIG_BPF_JIT=y`
+  - `CONFIG_BPF_LSM=y` (for enforce mode)
+  - `CONFIG_DEBUG_INFO_BTF=y`
+- Cgroup v2 (unified hierarchy)
+- Root privileges or `CAP_SYS_ADMIN`, `CAP_BPF`, `CAP_PERFMON`
+
+### Enable BPF LSM
+
+If `bpf` is missing from `/sys/kernel/security/lsm`:
+
+```bash
+# Edit GRUB configuration
+sudo vim /etc/default/grub
+GRUB_CMDLINE_LINUX="lsm=lockdown,capability,landlock,yama,bpf"
+
+# Update and reboot
+sudo update-grub
+sudo reboot
+```
+
+## Performance
+
+BPF LSM overhead is minimal:
+- ~100-500ns per execve() call
+- O(1) hash map lookups
+- Lock-free ring buffer for events
+- ~10MB base memory usage
+
+Run the benchmark:
+```bash
 ITERATIONS=200000 FILE=/etc/hosts scripts/perf_open_bench.sh
-WITH_AGENT=1 ITERATIONS=200000 FILE=/etc/hosts scripts/perf_open_bench.sh
-MAX_PCT=10 ITERATIONS=200000 FILE=/etc/hosts sudo scripts/perf_compare.sh
 ```
 
-## Event format
+## Contributing
 
-Ring buffer events are newline-delimited JSON:
-- EXEC: `{"type":"exec","pid":123,"ppid":1,"start_time":1234567890,"exec_id":"1234567890-123","cgid":987,"cgroup_path":"/sys/fs/cgroup/...", "comm":"bash"}`
-- BLOCK: `{"type":"block","pid":123,"ppid":1,"start_time":1234,"exec_id":"1234-123","parent_start_time":5678,"parent_exec_id":"5678-1","cgid":987,"cgroup_path":"/sys/fs/cgroup/...", "path":"/tmp/foo","resolved_path":"/tmp/foo","ino":42,"dev":2049,"action":"KILL","comm":"cat"}` (action is `AUDIT` when running with `--audit` or in tracepoint fallback)
+1. Fork the repository
+2. Create a feature branch
+3. Run tests: `cmake --build build && ctest --test-dir build`
+4. Submit a pull request
 
-## Smoke test
+## License
 
-A runnable smoke test (needs root, will start the agent):
-
-```
-sudo scripts/smoke_block.sh
-```
-
-It starts the agent, blocks a temp file, attempts to read it (expects KILL/EPERM), prints stats, and cleans up.
-
-If BPF LSM is not enabled, use the audit fallback smoke test instead:
-
-```
-sudo scripts/smoke_audit_fallback.sh
-```
+MIT License See [LICENSE](LICENSE) for details.

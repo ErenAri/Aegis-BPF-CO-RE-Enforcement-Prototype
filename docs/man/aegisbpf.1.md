@@ -1,0 +1,232 @@
+# AEGISBPF(1) - eBPF Runtime Security Agent
+
+## NAME
+
+aegisbpf - eBPF-based runtime security agent for blocking unauthorized process execution
+
+## SYNOPSIS
+
+**aegisbpf** [*GLOBAL-OPTIONS*] *COMMAND* [*COMMAND-OPTIONS*]
+
+## DESCRIPTION
+
+AegisBPF is a runtime security agent that uses eBPF and Linux Security Modules (LSM) to monitor and block process executions based on configurable policies.
+
+The agent can run in two modes:
+
+**Audit mode** (default): Observes and logs all executions without blocking. Uses tracepoints when BPF LSM is unavailable.
+
+**Enforce mode**: Actively blocks executions that match deny rules. Requires BPF LSM to be enabled in the kernel.
+
+## GLOBAL OPTIONS
+
+**--log-level**=*LEVEL*
+:   Set logging verbosity. Valid values: debug, info, warn, error. Default: info.
+
+**--log-format**=*FORMAT*
+:   Set log output format. Valid values: text, json. Default: text.
+
+## COMMANDS
+
+### run
+
+Start the security agent.
+
+**aegisbpf run** [**--audit**|**--enforce**] [**--seccomp**] [**--log**=*SINK*]
+
+**--audit**
+:   Run in audit-only mode (observe but don't block). This is the default.
+
+**--enforce**
+:   Run in enforce mode (block matching executions). Requires BPF LSM.
+
+**--seccomp**
+:   Apply seccomp-bpf filter after initialization for additional hardening.
+
+**--log**=*SINK*
+:   Event log destination. Valid values: stdout, journald, both. Default: stdout.
+
+### block
+
+Manage the deny list for blocking executions.
+
+**aegisbpf block add** *PATH*
+:   Add a file path to the deny list.
+
+**aegisbpf block del** *PATH*
+:   Remove a file path from the deny list.
+
+**aegisbpf block list**
+:   List all entries in the deny list.
+
+**aegisbpf block clear**
+:   Remove all entries from the deny list and reset statistics.
+
+### allow
+
+Manage the cgroup allowlist.
+
+**aegisbpf allow add** *CGROUP-PATH*
+:   Add a cgroup to the allowlist. Processes in allowed cgroups bypass deny rules.
+
+**aegisbpf allow del** *CGROUP-PATH*
+:   Remove a cgroup from the allowlist.
+
+**aegisbpf allow list**
+:   List all cgroup IDs in the allowlist.
+
+### policy
+
+Manage policy files.
+
+**aegisbpf policy lint** *FILE*
+:   Validate a policy file without applying it.
+
+**aegisbpf policy apply** *FILE* [**--reset**] [**--sha256** *HEX*] [**--sha256-file** *PATH*] [**--no-rollback**]
+:   Apply a policy file. Options:
+    - **--reset**: Clear existing rules before applying.
+    - **--sha256**: Verify file matches the specified SHA256 hash.
+    - **--sha256-file**: Read expected hash from a file.
+    - **--no-rollback**: Don't rollback on failure.
+
+**aegisbpf policy export** *FILE*
+:   Export current rules to a policy file.
+
+**aegisbpf policy show**
+:   Display the currently applied policy.
+
+**aegisbpf policy rollback**
+:   Restore the previously applied policy.
+
+### stats
+
+Display agent statistics.
+
+**aegisbpf stats**
+
+Shows:
+- Number of deny entries (inode and path based)
+- Number of allow cgroup entries
+- Total block count
+- Ring buffer drop count
+- Per-cgroup and per-path block counts
+
+### metrics
+
+Output Prometheus-format metrics.
+
+**aegisbpf metrics** [**--out** *PATH*]
+
+**--out** *PATH*
+:   Write metrics to file instead of stdout. Use "-" for stdout (default).
+
+### health
+
+Check agent prerequisites and status.
+
+**aegisbpf health**
+
+Checks:
+- Cgroup v2 availability
+- BPF filesystem mount
+- BTF availability
+- BPF object file presence
+- BPF LSM enablement
+- Kernel configuration
+- Pin status (when root)
+
+## POLICY FILE FORMAT
+
+Policy files use INI-style syntax:
+
+```
+version=1
+
+# Block these paths
+[deny_path]
+/usr/bin/malware
+/opt/dangerous/binary
+
+# Block by inode (dev:inode)
+[deny_inode]
+259:12345
+
+# Allow processes in these cgroups
+[allow_cgroup]
+/sys/fs/cgroup/system.slice
+cgid:123456
+```
+
+## ENVIRONMENT
+
+**AEGIS_BPF_OBJ_PATH**
+:   Override the path to the BPF object file.
+
+## FILES
+
+*/sys/fs/bpf/aegis/**
+:   BPF map and link pins.
+
+*/var/lib/aegisbpf/deny.db*
+:   Persistent deny list database.
+
+*/var/lib/aegisbpf/policy.applied*
+:   Currently applied policy (for rollback).
+
+*/etc/aegisbpf/policy.conf*
+:   Default policy file location.
+
+## EXIT STATUS
+
+**0**
+:   Success
+
+**1**
+:   Error occurred
+
+## EXAMPLES
+
+Start agent in audit mode:
+```
+sudo aegisbpf run --audit --log=journald
+```
+
+Start agent in enforce mode with JSON logging:
+```
+sudo aegisbpf run --enforce --log-format=json
+```
+
+Block a binary:
+```
+sudo aegisbpf block add /usr/bin/danger
+```
+
+Apply a policy with SHA256 verification:
+```
+sudo aegisbpf policy apply /etc/aegisbpf/policy.conf \
+    --sha256 abc123...
+```
+
+Export Prometheus metrics:
+```
+sudo aegisbpf metrics --out /var/lib/prometheus/aegisbpf.prom
+```
+
+## REQUIREMENTS
+
+- Linux kernel 5.8+ with BTF support
+- BPF LSM enabled for enforce mode (lsm=bpf in kernel cmdline)
+- Cgroup v2
+- CAP_SYS_ADMIN, CAP_BPF, CAP_PERFMON capabilities
+
+## SEE ALSO
+
+bpftool(8), bpf(2)
+
+## AUTHORS
+
+AegisBPF Team
+
+## BUGS
+
+Report bugs at: https://github.com/aegisbpf/aegisbpf/issues

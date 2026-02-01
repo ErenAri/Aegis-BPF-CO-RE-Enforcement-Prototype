@@ -1,0 +1,164 @@
+# AegisBPF Helm Chart Values
+# Default configuration for deploying AegisBPF as a DaemonSet
+
+# Image configuration
+image:
+  repository: ghcr.io/aegisbpf/aegisbpf
+  tag: ""  # Defaults to Chart appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Agent configuration
+agent:
+  # Run in audit mode (true) or enforce mode (false)
+  auditMode: true
+
+  # Enable seccomp filter for additional security hardening
+  seccomp: false
+
+  # Log output destination: stdout, journald, both
+  logSink: stdout
+
+  # Log level: debug, info, warn, error
+  logLevel: info
+
+  # Log format: text, json
+  logFormat: json
+
+# Policy configuration
+policy:
+  # Enable policy ConfigMap
+  enabled: false
+
+  # Policy content (if enabled)
+  content: |
+    version=1
+
+    # Add deny paths here
+    [deny_path]
+    # /usr/bin/dangerous
+
+    # Add allowed cgroups here
+    [allow_cgroup]
+    # /sys/fs/cgroup/system.slice
+
+# Resource limits
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations (deploy on all nodes by default)
+tolerations:
+  - operator: Exists
+
+# Affinity rules
+affinity: {}
+
+# Security context for the pod
+podSecurityContext: {}
+
+# Security context for the container
+securityContext:
+  privileged: true  # Required for BPF operations
+  capabilities:
+    add:
+      - SYS_ADMIN
+      - BPF
+      - PERFMON
+      - NET_ADMIN
+      - SYS_RESOURCE
+
+# Volume mounts (required for BPF and cgroup access)
+volumes:
+  # BPF filesystem
+  - name: bpffs
+    hostPath:
+      path: /sys/fs/bpf
+      type: DirectoryOrCreate
+
+  # Cgroup filesystem
+  - name: cgroup
+    hostPath:
+      path: /sys/fs/cgroup
+      type: Directory
+
+  # Kernel BTF
+  - name: btf
+    hostPath:
+      path: /sys/kernel/btf
+      type: Directory
+
+  # Debug filesystem (optional, for tracing)
+  - name: debugfs
+    hostPath:
+      path: /sys/kernel/debug
+      type: DirectoryOrCreate
+
+volumeMounts:
+  - name: bpffs
+    mountPath: /sys/fs/bpf
+  - name: cgroup
+    mountPath: /sys/fs/cgroup
+    readOnly: true
+  - name: btf
+    mountPath: /sys/kernel/btf
+    readOnly: true
+  - name: debugfs
+    mountPath: /sys/kernel/debug
+    readOnly: true
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod labels
+podLabels: {}
+
+# Update strategy for DaemonSet
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# Prometheus metrics
+metrics:
+  enabled: false
+  port: 9090
+  path: /metrics
+
+# Liveness and readiness probes
+livenessProbe:
+  exec:
+    command:
+      - /usr/bin/aegisbpf
+      - health
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  exec:
+    command:
+      - /usr/bin/aegisbpf
+      - health
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Priority class
+priorityClassName: system-node-critical

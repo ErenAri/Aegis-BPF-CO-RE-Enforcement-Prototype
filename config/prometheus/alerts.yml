@@ -1,0 +1,110 @@
+# AegisBPF Prometheus Alert Rules
+# Import this file into your Prometheus configuration
+#
+# Example prometheus.yml:
+#   rule_files:
+#     - /etc/prometheus/rules/aegisbpf.yml
+
+groups:
+  - name: aegisbpf
+    interval: 30s
+    rules:
+      # Agent availability
+      - alert: AegisBPFAgentDown
+        expr: up{job="aegisbpf"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AegisBPF agent is down"
+          description: "AegisBPF agent on {{ $labels.instance }} has been unreachable for more than 2 minutes."
+
+      # High block rate - potential attack or misconfiguration
+      - alert: AegisBPFHighBlockRate
+        expr: rate(aegisbpf_blocks_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High execution block rate detected"
+          description: "AegisBPF on {{ $labels.instance }} is blocking more than 100 executions per minute. Current rate: {{ $value | printf \"%.2f\" }}/min."
+
+      # Very high block rate - likely attack
+      - alert: AegisBPFVeryHighBlockRate
+        expr: rate(aegisbpf_blocks_total[1m]) > 1000
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Very high execution block rate - possible attack"
+          description: "AegisBPF on {{ $labels.instance }} is blocking more than 1000 executions per minute. Current rate: {{ $value | printf \"%.2f\" }}/min. Investigate immediately."
+
+      # Ring buffer drops - events being lost
+      - alert: AegisBPFRingbufDrops
+        expr: rate(aegisbpf_ringbuf_drops_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AegisBPF ring buffer is dropping events"
+          description: "AegisBPF on {{ $labels.instance }} is losing events due to ring buffer overflow. Drop rate: {{ $value | printf \"%.2f\" }}/s. Consider increasing buffer size or reducing event volume."
+
+      # High ring buffer drop rate
+      - alert: AegisBPFHighRingbufDrops
+        expr: rate(aegisbpf_ringbuf_drops_total[1m]) > 100
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AegisBPF high ring buffer drop rate"
+          description: "AegisBPF on {{ $labels.instance }} is losing more than 100 events/second. Security monitoring may be compromised."
+
+      # Empty policy - no deny rules configured
+      - alert: AegisBPFPolicyEmpty
+        expr: aegisbpf_deny_inode_entries == 0 and aegisbpf_deny_path_entries == 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "AegisBPF policy is empty"
+          description: "AegisBPF on {{ $labels.instance }} has no deny rules configured. The agent is running but not blocking anything."
+
+      # Policy too large - approaching map limits
+      - alert: AegisBPFPolicyNearLimit
+        expr: aegisbpf_deny_inode_entries > 9000 or aegisbpf_deny_path_entries > 9000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AegisBPF policy approaching size limit"
+          description: "AegisBPF on {{ $labels.instance }} has {{ $value }} entries, approaching the 10,000 entry limit. Consider consolidating rules."
+
+      # Specific cgroup with high block rate
+      - alert: AegisBPFCgroupHighBlockRate
+        expr: rate(aegisbpf_blocks_by_cgroup_total[5m]) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High block rate for cgroup {{ $labels.cgroup_path }}"
+          description: "Cgroup {{ $labels.cgroup_path }} on {{ $labels.instance }} is triggering more than 50 blocks per minute. This may indicate a compromised or misbehaving application."
+
+      # Specific path with repeated blocks
+      - alert: AegisBPFPathRepeatedBlocks
+        expr: increase(aegisbpf_blocks_by_path_total[1h]) > 100
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "Path {{ $labels.path }} blocked repeatedly"
+          description: "Path {{ $labels.path }} has been blocked {{ $value | printf \"%.0f\" }} times in the last hour on {{ $labels.instance }}."
+
+      # Agent metrics stale - scrape working but counters not updating
+      - alert: AegisBPFMetricsStale
+        expr: changes(aegisbpf_blocks_total[30m]) == 0 and aegisbpf_deny_inode_entries > 0
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "AegisBPF metrics appear stale"
+          description: "AegisBPF on {{ $labels.instance }} has a policy configured but no block events in 30 minutes. Verify the agent is functioning correctly."

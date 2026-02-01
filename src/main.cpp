@@ -67,7 +67,7 @@ static Result<void> setup_agent_cgroup(BpfState &state)
     return {};
 }
 
-static int run(bool audit_only)
+static int run(bool audit_only, bool enable_seccomp)
 {
     auto prereqs_result = check_prereqs();
     if (!prereqs_result) {
@@ -138,9 +138,20 @@ static int run(bool audit_only)
         return 1;
     }
 
+    // Apply seccomp filter after all initialization is complete
+    if (enable_seccomp) {
+        auto seccomp_result = apply_seccomp_filter();
+        if (!seccomp_result) {
+            logger().log(SLOG_ERROR("Failed to apply seccomp filter")
+                .field("error", seccomp_result.error().to_string()));
+            return 1;
+        }
+    }
+
     logger().log(SLOG_INFO("Agent started")
         .field("audit_only", audit_only)
-        .field("lsm_enabled", lsm_enabled));
+        .field("lsm_enabled", lsm_enabled)
+        .field("seccomp", enable_seccomp));
 
     int err = 0;
     while (!g_exiting) {
@@ -719,7 +730,7 @@ static LogLevel parse_log_level(const std::string &level)
 static int usage(const char *prog)
 {
     std::cerr << "Usage: " << prog
-              << " run [--audit|--enforce] [--log=stdout|journald|both] [--log-level=debug|info|warn|error] [--log-format=text|json]"
+              << " run [--audit|--enforce] [--seccomp] [--log=stdout|journald|both] [--log-level=debug|info|warn|error] [--log-format=text|json]"
               << " | block {add|del|list|clear} [path]"
               << " | allow {add|del} <cgroup_path> | allow list"
               << " | policy {lint|apply|export} <file> [--reset] [--sha256 <hex>|--sha256-file <path>] [--no-rollback]"
@@ -753,19 +764,22 @@ int main(int argc, char **argv)
     logger().set_json_format(json_format);
 
     if (argc == 1) {
-        return run(false);
+        return run(false, false);
     }
 
     std::string cmd = argv[1];
 
     if (cmd == "run") {
         bool audit_only = false;
+        bool enable_seccomp = false;
         for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--audit" || arg == "--mode=audit") {
                 audit_only = true;
             } else if (arg == "--enforce" || arg == "--mode=enforce") {
                 audit_only = false;
+            } else if (arg == "--seccomp") {
+                enable_seccomp = true;
             } else if (arg.rfind("--log=", 0) == 0) {
                 std::string value = arg.substr(std::strlen("--log="));
                 if (!set_event_log_sink(value)) {
@@ -785,7 +799,7 @@ int main(int argc, char **argv)
                 return usage(argv[0]);
             }
         }
-        return run(audit_only);
+        return run(audit_only, enable_seccomp);
     }
 
     if (cmd == "block") {

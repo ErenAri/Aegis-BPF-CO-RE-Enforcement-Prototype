@@ -1,0 +1,11 @@
+{{- if .Values.policy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aegisbpf.fullname" . }}-policy
+  labels:
+    {{- include "aegisbpf.labels" . | nindent 4 }}
+data:
+  policy.conf: |
+    {{- .Values.policy.content | nindent 4 }}
+{{- end }}
