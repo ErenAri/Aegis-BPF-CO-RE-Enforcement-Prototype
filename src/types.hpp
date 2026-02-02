@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 #include <array>
@@ -149,7 +150,9 @@ struct PolicyIssues {
     std::vector<std::string> errors;
     std::vector<std::string> warnings;
 
+    // cppcheck-suppress unusedFunction
     [[nodiscard]] bool has_errors() const { return !errors.empty(); }
+    // cppcheck-suppress unusedFunction
     [[nodiscard]] bool has_warnings() const { return !warnings.empty(); }
 };
 

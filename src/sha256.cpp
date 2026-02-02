@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "sha256.hpp"
 
 #include <algorithm>
@@ -235,10 +236,10 @@ bool parse_sha256_token(const std::string& text, std::string& hex)
     if (token.size() != 64) {
         return false;
     }
-    for (char c : token) {
-        if (!std::isxdigit(static_cast<unsigned char>(c))) {
-            return false;
-        }
+    if (!std::all_of(token.begin(), token.end(), [](unsigned char c) {
+            return std::isxdigit(c);
+        })) {
+        return false;
     }
     std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));

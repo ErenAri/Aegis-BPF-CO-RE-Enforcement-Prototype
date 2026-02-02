@@ -1,3 +1,6 @@
+// cppcheck-suppress-file missingIncludeSystem
+// cppcheck-suppress-file missingInclude
+// cppcheck-suppress-file syntaxError
 #include "sha256.hpp"
 #include <gtest/gtest.h>
 

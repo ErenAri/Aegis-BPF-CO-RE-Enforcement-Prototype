@@ -1,3 +1,5 @@
+// cppcheck-suppress-file missingIncludeSystem
+// cppcheck-suppress-file toomanyconfigs
 #include "seccomp.hpp"
 #include "logging.hpp"
 

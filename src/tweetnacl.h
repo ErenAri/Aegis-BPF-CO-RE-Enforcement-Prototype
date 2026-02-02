@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 /*
  * TweetNaCl - A self-contained public-domain crypto library
  * https://tweetnacl.cr.yp.to/

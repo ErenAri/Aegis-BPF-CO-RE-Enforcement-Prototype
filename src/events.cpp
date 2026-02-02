@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "events.hpp"
 #include "logging.hpp"
 #include "utils.hpp"
@@ -185,6 +186,7 @@ void print_block_event(const BlockEvent& ev)
 #endif
 }
 
+// cppcheck-suppress constParameterPointer
 int handle_event(void*, void* data, size_t)
 {
     const auto* e = static_cast<const Event*>(data);

@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "policy.hpp"
 #include "bpf_ops.hpp"
 #include "logging.hpp"
@@ -189,6 +190,7 @@ Result<void> record_applied_policy(const std::string& path, const std::string& h
     return {};
 }
 
+// cppcheck-suppress constParameterReference
 Result<void> reset_policy_maps(BpfState& state)
 {
     TRY(clear_map_entries(state.deny_inode));

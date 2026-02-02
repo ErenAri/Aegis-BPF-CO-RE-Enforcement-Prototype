@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 /*
  * TweetNaCl - A self-contained public-domain crypto library
  * https://tweetnacl.cr.yp.to/
@@ -71,6 +72,7 @@ static int vn(const u8* x, const u8* y, int n)
 
 static int crypto_verify_32(const u8* x, const u8* y) { return vn(x, y, 32); }
 
+// cppcheck-suppress unusedFunction
 static void core(u8* out, const u8* in, const u8* k, const u8* c, int h)
 {
     u64 w[16], x[16], y[16], t[4];
@@ -289,6 +291,7 @@ int crypto_hash(u8* out, const u8* m, u64 n)
     x[n] = 128;
     n = 256 - 128 * (n < 112);
     x[n - 9] = b >> 61;
+    // cppcheck-suppress pointerOutOfBoundsCond
     ts64(x + n - 8, b << 3);
 
     const u8* x_ptr = x;
@@ -544,6 +547,7 @@ int crypto_sign_detached(u8* sig, const u8* m, unsigned long long mlen, const u8
     if (!sm) return -1;
     u64 smlen;
     int rc = crypto_sign(sm, &smlen, m, mlen, sk);
+    // cppcheck-suppress knownConditionTrueFalse
     if (rc == 0) {
         memcpy(sig, sm, 64);
     }

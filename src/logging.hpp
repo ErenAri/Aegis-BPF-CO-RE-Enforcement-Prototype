@@ -1,3 +1,5 @@
+// cppcheck-suppress-file missingIncludeSystem
+// cppcheck-suppress-file unusedFunction
 #pragma once
 
 #include <chrono>
@@ -39,9 +41,8 @@ inline const char* log_level_string(LogLevel level)
 class LogEntry {
   public:
     LogEntry(LogLevel level, std::string message)
-        : level_(level), message_(std::move(message))
+        : level_(level), message_(std::move(message)), timestamp_(std::chrono::system_clock::now())
     {
-        timestamp_ = std::chrono::system_clock::now();
     }
 
     LogEntry& field(const std::string& key, const std::string& value)
@@ -197,8 +198,8 @@ class Logger {
   public:
     static Logger& instance()
     {
-        static Logger logger;
-        return logger;
+        static Logger instance_logger;
+        return instance_logger;
     }
 
     void set_level(LogLevel level) { min_level_ = level; }

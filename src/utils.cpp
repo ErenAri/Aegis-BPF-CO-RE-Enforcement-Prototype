@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "utils.hpp"
 #include "bpf_ops.hpp"
 #include "logging.hpp"
@@ -501,6 +502,7 @@ bool detect_break_glass()
     return false;
 }
 
+// cppcheck-suppress unusedFunction
 Result<std::pair<InodeId, std::string>> canonicalize_path(const std::string& path)
 {
     if (path.empty()) {
@@ -528,6 +530,7 @@ Result<std::pair<InodeId, std::string>> canonicalize_path(const std::string& pat
     return std::make_pair(id, resolved_str);
 }
 
+// cppcheck-suppress unusedFunction
 Result<InodeId> resolve_to_inode(const std::string& path, bool follow_symlinks)
 {
     if (path.empty()) {

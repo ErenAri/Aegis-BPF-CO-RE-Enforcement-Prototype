@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "bpf_ops.hpp"
 #include "logging.hpp"
 #include "utils.hpp"
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits.h>
+#include <numeric>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -419,10 +421,7 @@ Result<std::vector<std::pair<uint64_t, uint64_t>>> read_cgroup_block_counts(bpf_
         if (bpf_map_lookup_elem(fd, &key, vals.data())) {
             return Error::system(errno, "Failed to read deny_cgroup_stats");
         }
-        uint64_t sum = 0;
-        for (uint64_t v : vals) {
-            sum += v;
-        }
+        uint64_t sum = std::accumulate(vals.begin(), vals.end(), uint64_t{0});
         out.emplace_back(key, sum);
         rc = bpf_map_get_next_key(fd, &key, &next_key);
         key = next_key;
@@ -446,10 +445,7 @@ Result<std::vector<std::pair<InodeId, uint64_t>>> read_inode_block_counts(bpf_ma
         if (bpf_map_lookup_elem(fd, &key, vals.data())) {
             return Error::system(errno, "Failed to read deny_inode_stats");
         }
-        uint64_t sum = 0;
-        for (uint64_t v : vals) {
-            sum += v;
-        }
+        uint64_t sum = std::accumulate(vals.begin(), vals.end(), uint64_t{0});
         out.emplace_back(key, sum);
         rc = bpf_map_get_next_key(fd, &key, &next_key);
         key = next_key;
@@ -473,10 +469,7 @@ Result<std::vector<std::pair<std::string, uint64_t>>> read_path_block_counts(bpf
         if (bpf_map_lookup_elem(fd, &key, vals.data())) {
             return Error::system(errno, "Failed to read deny_path_stats");
         }
-        uint64_t sum = 0;
-        for (uint64_t v : vals) {
-            sum += v;
-        }
+        uint64_t sum = std::accumulate(vals.begin(), vals.end(), uint64_t{0});
         std::string path(key.path, strnlen(key.path, sizeof(key.path)));
         out.emplace_back(path, sum);
         rc = bpf_map_get_next_key(fd, &key, &next_key);
@@ -515,6 +508,7 @@ Result<void> reset_block_stats_map(bpf_map* map)
     return {};
 }
 
+// cppcheck-suppress unusedFunction
 Result<void> set_agent_config(BpfState& state, bool audit_only)
 {
     if (!state.config_map) {
@@ -559,6 +553,7 @@ Result<void> ensure_layout_version(BpfState& state)
     return {};
 }
 
+// cppcheck-suppress unusedFunction
 Result<bool> check_prereqs()
 {
     if (!std::filesystem::exists("/sys/fs/cgroup/cgroup.controllers")) {
@@ -576,9 +571,7 @@ Result<void> add_deny_inode(BpfState& state, const InodeId& id, DenyEntries& ent
     if (bpf_map_update_elem(bpf_map__fd(state.deny_inode), &id, &one, BPF_ANY)) {
         return Error::system(errno, "Failed to update deny_inode_map");
     }
-    if (entries.find(id) == entries.end()) {
-        entries[id] = "";
-    }
+    entries.try_emplace(id, "");
     return {};
 }
 

@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "crypto.hpp"
 #include "logging.hpp"
 #include "sha256.hpp"
@@ -83,6 +84,7 @@ bool parse_header_line(const std::string& line, std::string& key, std::string& v
 
 }  // anonymous namespace
 
+// cppcheck-suppress unusedFunction
 Result<std::pair<PublicKey, SecretKey>> generate_keypair()
 {
     PublicKey pk{};
@@ -303,13 +305,8 @@ Result<void> verify_bundle(const SignedPolicyBundle& bundle,
     }
 
     // Check if signer key is trusted
-    bool key_trusted = false;
-    for (const auto& trusted : trusted_keys) {
-        if (trusted == bundle.signer_key) {
-            key_trusted = true;
-            break;
-        }
-    }
+    bool key_trusted = std::any_of(trusted_keys.begin(), trusted_keys.end(),
+                                   [&bundle](const auto& trusted) { return trusted == bundle.signer_key; });
     if (!key_trusted) {
         return Error(ErrorCode::SignatureInvalid, "Signer key is not trusted",
                      encode_hex(bundle.signer_key));

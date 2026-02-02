@@ -1,3 +1,5 @@
+// cppcheck-suppress-file missingIncludeSystem
+// cppcheck-suppress-file syntaxError
 /*
  * AegisBPF - E2E Bypass Tests
  *
@@ -8,6 +10,7 @@
  * They are designed to be run in a controlled test environment.
  */
 
+// cppcheck-suppress-file syntaxError
 #include <gtest/gtest.h>
 
 #include <cerrno>

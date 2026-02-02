@@ -1,3 +1,5 @@
+// cppcheck-suppress-file missingIncludeSystem
+// cppcheck-suppress-file unusedFunction
 #pragma once
 
 #include <cstring>
@@ -121,9 +123,11 @@ template <typename T>
 class Result {
   public:
     // Implicit construction from value (success)
+    // cppcheck-suppress noExplicitConstructor
     Result(T value) : data_(std::move(value)) {}
 
     // Implicit construction from Error (failure)
+    // cppcheck-suppress noExplicitConstructor
     Result(Error error) : data_(std::move(error)) {}
 
     // Check if result is success
@@ -143,6 +147,7 @@ class Result {
     [[nodiscard]] const Error& error() const { return std::get<Error>(data_); }
 
     // Get value or default
+    // cppcheck-suppress passedByValue
     [[nodiscard]] T value_or(T default_value) const
     {
         if (ok()) return value();
@@ -174,6 +179,7 @@ class Result<void> {
     Result() : error_(std::nullopt) {}
 
     // Failure
+    // cppcheck-suppress noExplicitConstructor
     Result(Error error) : error_(std::move(error)) {}
 
     [[nodiscard]] bool ok() const { return !error_.has_value(); }

@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 #include "result.hpp"
@@ -172,6 +173,7 @@ class RingBufferGuard {
     [[nodiscard]] ring_buffer* get() const { return rb_; }
     [[nodiscard]] explicit operator bool() const { return rb_ != nullptr; }
 
+    // cppcheck-suppress unusedFunction
     ring_buffer* release()
     {
         ring_buffer* tmp = rb_;

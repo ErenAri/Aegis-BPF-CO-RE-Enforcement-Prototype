@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 /*
  * AegisBPF - eBPF-based runtime security agent
  *
@@ -783,7 +784,7 @@ static int policy_apply_signed(const std::string& bundle_path, bool require_sign
     std::string content = ss.str();
 
     // Check if it's a signed bundle
-    if (content.find("AEGIS-POLICY-BUNDLE") == 0) {
+    if (content.starts_with("AEGIS-POLICY-BUNDLE")) {
         // Parse signed bundle
         auto bundle_result = parse_signed_bundle(content);
         if (!bundle_result) {
@@ -1499,7 +1500,7 @@ int main(int argc, char** argv)
             std::string first_line;
             std::getline(check_file, first_line);
             check_file.close();
-            if (first_line.find("AEGIS-POLICY-BUNDLE") == 0 || require_signature) {
+            if (first_line.starts_with("AEGIS-POLICY-BUNDLE") || require_signature) {
                 return policy_apply_signed(argv[3], require_signature);
             }
             auto result = policy_apply(argv[3], reset, sha256, sha256_file, rollback_on_failure);

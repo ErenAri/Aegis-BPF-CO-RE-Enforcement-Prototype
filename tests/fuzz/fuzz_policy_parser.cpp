@@ -1,3 +1,5 @@
+// cppcheck-suppress-file missingIncludeSystem
+// cppcheck-suppress-file missingInclude
 /*
  * AegisBPF - Policy Parser Fuzzer
  *

@@ -1,3 +1,6 @@
+// cppcheck-suppress-file missingIncludeSystem
+// cppcheck-suppress-file missingInclude
+// cppcheck-suppress-file unknownMacro
 #include <benchmark/benchmark.h>
 #include <fstream>
 #include <filesystem>

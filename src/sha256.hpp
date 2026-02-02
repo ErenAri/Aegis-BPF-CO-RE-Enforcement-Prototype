@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #pragma once
 
 #include <array>

@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include "kernel_features.hpp"
 #include "logging.hpp"
 

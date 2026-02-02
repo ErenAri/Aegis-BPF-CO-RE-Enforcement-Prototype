@@ -1,3 +1,4 @@
+// cppcheck-suppress-file missingIncludeSystem
 #include <gtest/gtest.h>
 
 int main(int argc, char** argv)
