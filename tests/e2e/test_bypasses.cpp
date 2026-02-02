@@ -83,7 +83,8 @@ TEST_F(BypassTest, SymlinkBypass)
     // For this test, we assume the file is already blocked
 
     // Verify both paths point to same inode
-    struct stat st1{}, st2{};
+    struct stat st1 {
+    }, st2{};
     ASSERT_EQ(0, stat(kTestFile, &st1));
     ASSERT_EQ(0, stat(symlink_path, &st2));
     EXPECT_EQ(st1.st_ino, st2.st_ino);
@@ -104,7 +105,8 @@ TEST_F(BypassTest, HardlinkBypass)
     ASSERT_EQ(0, link(kTestFile, hardlink_path));
 
     // Verify both paths point to same inode
-    struct stat st1{}, st2{};
+    struct stat st1 {
+    }, st2{};
     ASSERT_EQ(0, stat(kTestFile, &st1));
     ASSERT_EQ(0, stat(hardlink_path, &st2));
     EXPECT_EQ(st1.st_ino, st2.st_ino);
@@ -120,14 +122,14 @@ TEST_F(BypassTest, RenameBypass)
     const char* renamed_path = "/tmp/aegisbpf_bypass_test/renamed_target.txt";
 
     // Get original inode
-    struct stat st_before{};
+    struct stat st_before {};
     ASSERT_EQ(0, stat(kTestFile, &st_before));
 
     // Rename the file
     ASSERT_EQ(0, rename(kTestFile, renamed_path));
 
     // Verify inode is unchanged
-    struct stat st_after{};
+    struct stat st_after {};
     ASSERT_EQ(0, stat(renamed_path, &st_after));
     EXPECT_EQ(st_before.st_ino, st_after.st_ino);
     EXPECT_EQ(st_before.st_dev, st_after.st_dev);
@@ -148,7 +150,8 @@ TEST_F(BypassTest, ProcFdBypass)
     std::string proc_path = "/proc/self/fd/" + std::to_string(fd);
 
     // The proc path should resolve to the same file
-    struct stat st_orig{}, st_proc{};
+    struct stat st_orig {
+    }, st_proc{};
     ASSERT_EQ(0, fstat(fd, &st_orig));
     ASSERT_EQ(0, stat(proc_path.c_str(), &st_proc));
     EXPECT_EQ(st_orig.st_ino, st_proc.st_ino);
@@ -162,7 +165,7 @@ TEST_F(BypassTest, ProcFdBypass)
 // Test: Verifying inode tracking across filesystem operations
 TEST_F(BypassTest, InodeStability)
 {
-    struct stat st{};
+    struct stat st {};
     ASSERT_EQ(0, stat(kTestFile, &st));
     ino_t original_inode = st.st_ino;
     dev_t original_dev = st.st_dev;
@@ -196,11 +199,11 @@ TEST_F(BypassTest, DirectoryTraversal)
         "/tmp/aegisbpf_bypass_test/./target.txt",
     };
 
-    struct stat st_base{};
+    struct stat st_base {};
     ASSERT_EQ(0, stat(paths[0], &st_base));
 
     for (const char* path : paths) {
-        struct stat st{};
+        struct stat st {};
         if (stat(path, &st) == 0) {
             EXPECT_EQ(st_base.st_ino, st.st_ino)
                 << "Path: " << path << " should have same inode";
@@ -221,7 +224,8 @@ TEST_F(BypassTest, CaseSensitivity)
     out.close();
 
     // These should be different files with different inodes
-    struct stat st_lower{}, st_upper{};
+    struct stat st_lower {
+    }, st_upper{};
     ASSERT_EQ(0, stat(kTestFile, &st_lower));
     ASSERT_EQ(0, stat(uppercase_path, &st_upper));
 
@@ -236,7 +240,8 @@ TEST_F(BypassTest, SymlinkTargetVsSymlink)
     ASSERT_EQ(0, symlink(kTestFile, symlink_path));
 
     // lstat gets the symlink inode, stat follows the symlink
-    struct stat st_link{}, st_target{};
+    struct stat st_link {
+    }, st_target{};
     ASSERT_EQ(0, lstat(symlink_path, &st_link));
     ASSERT_EQ(0, stat(symlink_path, &st_target));
 
@@ -245,7 +250,7 @@ TEST_F(BypassTest, SymlinkTargetVsSymlink)
         << "Symlink inode should differ from target inode";
 
     // Verify target inode matches direct access
-    struct stat st_direct{};
+    struct stat st_direct {};
     ASSERT_EQ(0, stat(kTestFile, &st_direct));
     EXPECT_EQ(st_target.st_ino, st_direct.st_ino);
 }
@@ -261,7 +266,7 @@ TEST_F(BypassTest, SurvivalBinariesExist)
     };
 
     for (const char* path : survival_binaries) {
-        struct stat st{};
+        struct stat st {};
         if (stat(path, &st) == 0) {
             EXPECT_TRUE(can_read_file(path))
                 << "Survival binary should be readable: " << path;

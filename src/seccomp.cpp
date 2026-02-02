@@ -23,10 +23,6 @@ namespace aegis {
 
 namespace {
 
-// BPF macros for seccomp filter construction
-#define BPF_STMT(code, k) {(unsigned short)(code), 0, 0, k}
-#define BPF_JUMP(code, k, jt, jf) {(unsigned short)(code), jt, jf, k}
-
 // Syscall allowlist - these are the only syscalls aegisbpf needs
 // Organized by category for maintainability
 // Note: Some syscalls are architecture-specific and wrapped in #ifdef

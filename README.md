@@ -369,7 +369,7 @@ sudo systemctl enable --now aegisbpf
                     │      BPF LSM Program          │
                     │      (kernel space)           │
                     │                               │
-                    │   open() ───► check maps     │
+                    │   open() ───► check maps      │
                     │              ──► allow/deny   │
                     └───────────────────────────────┘
 ```

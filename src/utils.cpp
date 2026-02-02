@@ -155,7 +155,7 @@ uint32_t encode_dev(dev_t dev)
 
 Result<InodeId> path_to_inode(const std::string& path)
 {
-    struct stat st{};
+    struct stat st {};
     if (stat(path.c_str(), &st) != 0) {
         return Error::system(errno, "stat failed for " + path);
     }
@@ -168,7 +168,7 @@ Result<InodeId> path_to_inode(const std::string& path)
 
 Result<uint64_t> path_to_cgid(const std::string& path)
 {
-    struct stat st{};
+    struct stat st {};
     if (stat(path.c_str(), &st) != 0) {
         return Error::system(errno, "stat failed for " + path);
     }
@@ -219,7 +219,7 @@ std::string CgroupPathCache::resolve(uint64_t cgid)
         if (!dir->is_directory()) {
             continue;
         }
-        struct stat st{};
+        struct stat st {};
         if (stat(dir->path().c_str(), &st) != 0) {
             continue;
         }
@@ -403,7 +403,7 @@ std::string find_kernel_config_value_in_proc(const std::string& key)
 
 std::string kernel_config_value(const std::string& key)
 {
-    struct utsname uts{};
+    struct utsname uts {};
     if (uname(&uts) == 0) {
         std::string path = std::string("/boot/config-") + uts.release;
         std::string value = find_kernel_config_value_in_file(path, key);
@@ -515,7 +515,7 @@ Result<std::pair<InodeId, std::string>> canonicalize_path(const std::string& pat
 
     std::string resolved_str = resolved.string();
 
-    struct stat st{};
+    struct stat st {};
     if (stat(resolved_str.c_str(), &st) != 0) {
         return Error::system(errno, "stat failed for " + resolved_str);
     }
@@ -534,7 +534,7 @@ Result<InodeId> resolve_to_inode(const std::string& path, bool follow_symlinks)
         return Error(ErrorCode::InvalidArgument, "Path is empty");
     }
 
-    struct stat st{};
+    struct stat st {};
     int rc;
     if (follow_symlinks) {
         rc = stat(path.c_str(), &st);

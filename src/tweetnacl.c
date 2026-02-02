@@ -38,30 +38,41 @@ static const i64 I[16] = {0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806
                           0xd7a7, 0x3dfb, 0x0099, 0x2b4d, 0xdf0b, 0x4fc1, 0x2480, 0x2b83};
 
 static u64 L64(u64 x, int c) { return (x << c) | ((x & 0xffffffffffffffffULL) >> (64 - c)); }
-static u64 ld32(const u8 *x) { return (u64)x[0] | ((u64)x[1] << 8) | ((u64)x[2] << 16) | ((u64)x[3] << 24); }
-static u64 dl64(const u8 *x) {
+static u64 ld32(const u8* x) { return (u64)x[0] | ((u64)x[1] << 8) | ((u64)x[2] << 16) | ((u64)x[3] << 24); }
+static u64 dl64(const u8* x)
+{
     u64 u = 0;
     for (int i = 0; i < 8; ++i) u = (u << 8) | x[i];
     return u;
 }
 
-static void st32(u8 *x, u64 u) {
-    for (int i = 0; i < 4; ++i) { x[i] = u; u >>= 8; }
+static void st32(u8* x, u64 u)
+{
+    for (int i = 0; i < 4; ++i) {
+        x[i] = u;
+        u >>= 8;
+    }
 }
 
-static void ts64(u8 *x, u64 u) {
-    for (int i = 7; i >= 0; --i) { x[i] = u; u >>= 8; }
+static void ts64(u8* x, u64 u)
+{
+    for (int i = 7; i >= 0; --i) {
+        x[i] = u;
+        u >>= 8;
+    }
 }
 
-static int vn(const u8 *x, const u8 *y, int n) {
+static int vn(const u8* x, const u8* y, int n)
+{
     u64 d = 0;
     for (int i = 0; i < n; ++i) d |= x[i] ^ y[i];
     return (1 & ((d - 1) >> 8)) - 1;
 }
 
-static int crypto_verify_32(const u8 *x, const u8 *y) { return vn(x, y, 32); }
+static int crypto_verify_32(const u8* x, const u8* y) { return vn(x, y, 32); }
 
-static void core(u8 *out, const u8 *in, const u8 *k, const u8 *c, int h) {
+static void core(u8* out, const u8* in, const u8* k, const u8* c, int h)
+{
     u64 w[16], x[16], y[16], t[4];
     for (int i = 0; i < 4; ++i) {
         x[5 * i] = ld32(c + 4 * i);
@@ -91,65 +102,102 @@ static void core(u8 *out, const u8 *in, const u8 *k, const u8 *c, int h) {
             st32(out + 4 * i, x[5 * i]);
             st32(out + 16 + 4 * i, x[6 + i]);
         }
-    } else {
+    }
+    else {
         for (int i = 0; i < 16; ++i) st32(out + 4 * i, x[i] + y[i]);
     }
 }
 
 static const u8 sigma[16] = "expand 32-byte k";
 
-static void set25519(i64 *r, const i64 *a) { for (int i = 0; i < 16; ++i) r[i] = a[i]; }
-static void car25519(i64 *o) {
+static void set25519(i64* r, const i64* a)
+{
+    for (int i = 0; i < 16; ++i) r[i] = a[i];
+}
+static void car25519(i64* o)
+{
     for (int i = 0; i < 16; ++i) {
         o[(i + 1) % 16] += (i < 15 ? 1 : 38) * (o[i] >> 16);
         o[i] &= 0xffff;
     }
 }
-static void sel25519(i64 *p, i64 *q, int b) {
+static void sel25519(i64* p, i64* q, int b)
+{
     i64 c = ~(b - 1);
-    for (int i = 0; i < 16; ++i) { i64 t = c & (p[i] ^ q[i]); p[i] ^= t; q[i] ^= t; }
+    for (int i = 0; i < 16; ++i) {
+        i64 t = c & (p[i] ^ q[i]);
+        p[i] ^= t;
+        q[i] ^= t;
+    }
 }
-static void pack25519(u8 *o, const i64 *n) {
+static void pack25519(u8* o, const i64* n)
+{
     i64 m[16], t[16];
     for (int i = 0; i < 16; ++i) t[i] = n[i];
-    car25519(t); car25519(t); car25519(t);
+    car25519(t);
+    car25519(t);
+    car25519(t);
     for (int j = 0; j < 2; ++j) {
         m[0] = t[0] - 0xffed;
-        for (int i = 1; i < 15; ++i) { m[i] = t[i] - 0xffff - ((m[i-1] >> 16) & 1); m[i-1] &= 0xffff; }
+        for (int i = 1; i < 15; ++i) {
+            m[i] = t[i] - 0xffff - ((m[i - 1] >> 16) & 1);
+            m[i - 1] &= 0xffff;
+        }
         m[15] = t[15] - 0x7fff - ((m[14] >> 16) & 1);
         int b = (m[15] >> 16) & 1;
         m[14] &= 0xffff;
         sel25519(t, m, 1 - b);
     }
-    for (int i = 0; i < 16; ++i) { o[2 * i] = t[i] & 0xff; o[2 * i + 1] = t[i] >> 8; }
+    for (int i = 0; i < 16; ++i) {
+        o[2 * i] = t[i] & 0xff;
+        o[2 * i + 1] = t[i] >> 8;
+    }
 }
 
-static int neq25519(const i64 *a, const i64 *b) {
+static int neq25519(const i64* a, const i64* b)
+{
     u8 c[32], d[32];
-    pack25519(c, a); pack25519(d, b);
+    pack25519(c, a);
+    pack25519(d, b);
     return crypto_verify_32(c, d);
 }
 
-static u8 par25519(const i64 *a) { u8 d[32]; pack25519(d, a); return d[0] & 1; }
+static u8 par25519(const i64* a)
+{
+    u8 d[32];
+    pack25519(d, a);
+    return d[0] & 1;
+}
 
-static void unpack25519(i64 *o, const u8 *n) {
+static void unpack25519(i64* o, const u8* n)
+{
     for (int i = 0; i < 16; ++i) o[i] = n[2 * i] + ((i64)n[2 * i + 1] << 8);
     o[15] &= 0x7fff;
 }
 
-static void A(i64 *o, const i64 *a, const i64 *b) { for (int i = 0; i < 16; ++i) o[i] = a[i] + b[i]; }
-static void Z(i64 *o, const i64 *a, const i64 *b) { for (int i = 0; i < 16; ++i) o[i] = a[i] - b[i]; }
-static void M(i64 *o, const i64 *a, const i64 *b) {
+static void A(i64* o, const i64* a, const i64* b)
+{
+    for (int i = 0; i < 16; ++i) o[i] = a[i] + b[i];
+}
+static void Z(i64* o, const i64* a, const i64* b)
+{
+    for (int i = 0; i < 16; ++i) o[i] = a[i] - b[i];
+}
+static void M(i64* o, const i64* a, const i64* b)
+{
     i64 t[31];
     for (int i = 0; i < 31; ++i) t[i] = 0;
-    for (int i = 0; i < 16; ++i) for (int j = 0; j < 16; ++j) t[i + j] += a[i] * b[j];
+    for (int i = 0; i < 16; ++i)
+        for (int j = 0; j < 16; ++j) t[i + j] += a[i] * b[j];
     for (int i = 0; i < 15; ++i) t[i] += 38 * t[i + 16];
     for (int i = 0; i < 16; ++i) o[i] = t[i];
-    car25519(o); car25519(o);
+    car25519(o);
+    car25519(o);
 }
-static void S(i64 *o, const i64 *a) { M(o, a, a); }
+static void S(i64* o, const i64* a) { M(o, a, a); }
 
-static void inv25519(i64 *o, const i64 *i) {
+static void inv25519(i64* o, const i64* i)
+{
     i64 c[16];
     for (int a = 0; a < 16; ++a) c[a] = i[a];
     for (int a = 253; a >= 0; --a) {
@@ -159,7 +207,8 @@ static void inv25519(i64 *o, const i64 *i) {
     for (int a = 0; a < 16; ++a) o[a] = c[a];
 }
 
-static void pow2523(i64 *o, const i64 *i) {
+static void pow2523(i64* o, const i64* i)
+{
     i64 c[16];
     for (int a = 0; a < 16; ++a) c[a] = i[a];
     for (int a = 250; a >= 0; --a) {
@@ -189,17 +238,16 @@ static u64 K[80] = {
     0xca273eceea26619cULL, 0xd186b8c721c0c207ULL, 0xeada7dd6cde0eb1eULL, 0xf57d4f7fee6ed178ULL,
     0x06f067aa72176fbaULL, 0x0a637dc5a2c898a6ULL, 0x113f9804bef90daeULL, 0x1b710b35131c471bULL,
     0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL, 0x431d67c49c100d4cULL,
-    0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
-};
+    0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL};
 
-int crypto_hash(u8 *out, const u8 *m, u64 n) {
+int crypto_hash(u8* out, const u8* m, u64 n)
+{
     u8 h[64], x[256];
     u64 b = n;
 
     static const u64 iv[8] = {
         0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL, 0x3c6ef372fe94f82bULL, 0xa54ff53a5f1d36f1ULL,
-        0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL, 0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL
-    };
+        0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL, 0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
 
     for (int i = 0; i < 8; ++i) ts64(h + 8 * i, iv[i]);
 
@@ -208,9 +256,9 @@ int crypto_hash(u8 *out, const u8 *m, u64 n) {
         for (int i = 0; i < 8; ++i) a[i] = dl64(h + 8 * i);
         for (int i = 0; i < 16; ++i) w[i] = dl64(m + 8 * i);
         for (int i = 16; i < 80; ++i) {
-            u64 s0 = L64(w[i-15], 63) ^ L64(w[i-15], 56) ^ (w[i-15] >> 7);
-            u64 s1 = L64(w[i-2], 45) ^ L64(w[i-2], 3) ^ (w[i-2] >> 6);
-            w[i] = w[i-16] + s0 + w[i-7] + s1;
+            u64 s0 = L64(w[i - 15], 63) ^ L64(w[i - 15], 56) ^ (w[i - 15] >> 7);
+            u64 s1 = L64(w[i - 2], 45) ^ L64(w[i - 2], 3) ^ (w[i - 2] >> 6);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
         }
         for (int i = 0; i < 80; ++i) {
             u64 S1 = L64(a[4], 50) ^ L64(a[4], 46) ^ L64(a[4], 23);
@@ -219,12 +267,19 @@ int crypto_hash(u8 *out, const u8 *m, u64 n) {
             u64 S0 = L64(a[0], 36) ^ L64(a[0], 30) ^ L64(a[0], 25);
             u64 maj = (a[0] & a[1]) ^ (a[0] & a[2]) ^ (a[1] & a[2]);
             u64 t2 = S0 + maj;
-            a[7] = a[6]; a[6] = a[5]; a[5] = a[4];
+            a[7] = a[6];
+            a[6] = a[5];
+            a[5] = a[4];
             a[4] = a[3] + t1;
-            a[3] = a[2]; a[2] = a[1]; a[1] = a[0];
+            a[3] = a[2];
+            a[2] = a[1];
+            a[1] = a[0];
             a[0] = t1 + t2;
         }
-        for (int i = 0; i < 8; ++i) { a[i] += dl64(h + 8 * i); ts64(h + 8 * i, a[i]); }
+        for (int i = 0; i < 8; ++i) {
+            a[i] += dl64(h + 8 * i);
+            ts64(h + 8 * i, a[i]);
+        }
         m += 128;
         n -= 128;
     }
@@ -236,15 +291,15 @@ int crypto_hash(u8 *out, const u8 *m, u64 n) {
     x[n - 9] = b >> 61;
     ts64(x + n - 8, b << 3);
 
-    const u8 *x_ptr = x;
+    const u8* x_ptr = x;
     while (n > 0) {
         u64 a[8], w[80];
         for (int i = 0; i < 8; ++i) a[i] = dl64(h + 8 * i);
         for (int i = 0; i < 16; ++i) w[i] = dl64(x_ptr + 8 * i);
         for (int i = 16; i < 80; ++i) {
-            u64 s0 = L64(w[i-15], 63) ^ L64(w[i-15], 56) ^ (w[i-15] >> 7);
-            u64 s1 = L64(w[i-2], 45) ^ L64(w[i-2], 3) ^ (w[i-2] >> 6);
-            w[i] = w[i-16] + s0 + w[i-7] + s1;
+            u64 s0 = L64(w[i - 15], 63) ^ L64(w[i - 15], 56) ^ (w[i - 15] >> 7);
+            u64 s1 = L64(w[i - 2], 45) ^ L64(w[i - 2], 3) ^ (w[i - 2] >> 6);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
         }
         for (int i = 0; i < 80; ++i) {
             u64 S1 = L64(a[4], 50) ^ L64(a[4], 46) ^ L64(a[4], 23);
@@ -253,12 +308,19 @@ int crypto_hash(u8 *out, const u8 *m, u64 n) {
             u64 S0 = L64(a[0], 36) ^ L64(a[0], 30) ^ L64(a[0], 25);
             u64 maj = (a[0] & a[1]) ^ (a[0] & a[2]) ^ (a[1] & a[2]);
             u64 t2 = S0 + maj;
-            a[7] = a[6]; a[6] = a[5]; a[5] = a[4];
+            a[7] = a[6];
+            a[6] = a[5];
+            a[5] = a[4];
             a[4] = a[3] + t1;
-            a[3] = a[2]; a[2] = a[1]; a[1] = a[0];
+            a[3] = a[2];
+            a[2] = a[1];
+            a[1] = a[0];
             a[0] = t1 + t2;
         }
-        for (int i = 0; i < 8; ++i) { a[i] += dl64(h + 8 * i); ts64(h + 8 * i, a[i]); }
+        for (int i = 0; i < 8; ++i) {
+            a[i] += dl64(h + 8 * i);
+            ts64(h + 8 * i, a[i]);
+        }
         x_ptr += 128;
         n -= 128;
     }
@@ -267,31 +329,50 @@ int crypto_hash(u8 *out, const u8 *m, u64 n) {
     return 0;
 }
 
-static void add(i64 p[4][16], i64 q[4][16]) {
+static void add(i64 p[4][16], i64 q[4][16])
+{
     i64 a[16], b[16], c[16], d[16], t[16], e[16], f[16], g[16], h[16];
-    Z(a, p[1], p[0]); Z(t, q[1], q[0]); M(a, a, t);
-    A(b, p[0], p[1]); A(t, q[0], q[1]); M(b, b, t);
-    M(c, p[3], q[3]); M(c, c, D2);
-    M(d, p[2], q[2]); A(d, d, d);
-    Z(e, b, a); Z(f, d, c); A(g, d, c); A(h, b, a);
-    M(p[0], e, f); M(p[1], h, g); M(p[2], g, f); M(p[3], e, h);
+    Z(a, p[1], p[0]);
+    Z(t, q[1], q[0]);
+    M(a, a, t);
+    A(b, p[0], p[1]);
+    A(t, q[0], q[1]);
+    M(b, b, t);
+    M(c, p[3], q[3]);
+    M(c, c, D2);
+    M(d, p[2], q[2]);
+    A(d, d, d);
+    Z(e, b, a);
+    Z(f, d, c);
+    A(g, d, c);
+    A(h, b, a);
+    M(p[0], e, f);
+    M(p[1], h, g);
+    M(p[2], g, f);
+    M(p[3], e, h);
 }
 
-static void cswap(i64 p[4][16], i64 q[4][16], u8 b) {
+static void cswap(i64 p[4][16], i64 q[4][16], u8 b)
+{
     for (int i = 0; i < 4; ++i) sel25519(p[i], q[i], b);
 }
 
-static void pack(u8 *r, i64 p[4][16]) {
+static void pack(u8* r, i64 p[4][16])
+{
     i64 tx[16], ty[16], zi[16];
     inv25519(zi, p[2]);
-    M(tx, p[0], zi); M(ty, p[1], zi);
+    M(tx, p[0], zi);
+    M(ty, p[1], zi);
     pack25519(r, ty);
     r[31] ^= par25519(tx) << 7;
 }
 
-static void scalarmult(i64 p[4][16], i64 q[4][16], const u8 *s) {
-    set25519(p[0], gf0); set25519(p[1], gf1);
-    set25519(p[2], gf1); set25519(p[3], gf0);
+static void scalarmult(i64 p[4][16], i64 q[4][16], const u8* s)
+{
+    set25519(p[0], gf0);
+    set25519(p[1], gf1);
+    set25519(p[2], gf1);
+    set25519(p[3], gf0);
     for (int i = 255; i >= 0; --i) {
         u8 b = (s[i / 8] >> (i & 7)) & 1;
         cswap(p, q, b);
@@ -301,17 +382,21 @@ static void scalarmult(i64 p[4][16], i64 q[4][16], const u8 *s) {
     }
 }
 
-static void scalarbase(i64 p[4][16], const u8 *s) {
+static void scalarbase(i64 p[4][16], const u8* s)
+{
     i64 q[4][16];
-    set25519(q[0], X); set25519(q[1], Y);
-    set25519(q[2], gf1); M(q[3], X, Y);
+    set25519(q[0], X);
+    set25519(q[1], Y);
+    set25519(q[2], gf1);
+    M(q[3], X, Y);
     scalarmult(p, q, s);
 }
 
 static const u64 L[32] = {0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7,
                           0xa2, 0xde, 0xf9, 0xde, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10};
 
-static void modL(u8 *r, i64 x[64]) {
+static void modL(u8* r, i64 x[64])
+{
     for (int i = 63; i >= 32; --i) {
         i64 carry = 0;
         for (int j = i - 32; j < i - 12; ++j) {
@@ -329,17 +414,22 @@ static void modL(u8 *r, i64 x[64]) {
         x[j] &= 255;
     }
     for (int j = 0; j < 32; ++j) x[j] -= carry * L[j];
-    for (int i = 0; i < 32; ++i) { x[i + 1] += x[i] >> 8; r[i] = x[i] & 255; }
+    for (int i = 0; i < 32; ++i) {
+        x[i + 1] += x[i] >> 8;
+        r[i] = x[i] & 255;
+    }
 }
 
-static void reduce(u8 *r) {
+static void reduce(u8* r)
+{
     i64 x[64];
     for (int i = 0; i < 64; ++i) x[i] = (u64)r[i];
     for (int i = 0; i < 64; ++i) r[i] = 0;
     modL(r, x);
 }
 
-void randombytes(u8 *x, u64 xlen) {
+void randombytes(u8* x, u64 xlen)
+{
     int fd = open("/dev/urandom", O_RDONLY);
     if (fd < 0) return;
     while (xlen > 0) {
@@ -351,7 +441,8 @@ void randombytes(u8 *x, u64 xlen) {
     close(fd);
 }
 
-int crypto_sign_keypair(u8 *pk, u8 *sk) {
+int crypto_sign_keypair(u8* pk, u8* sk)
+{
     u8 d[64];
     i64 p[4][16];
     randombytes(sk, 32);
@@ -365,7 +456,8 @@ int crypto_sign_keypair(u8 *pk, u8 *sk) {
     return 0;
 }
 
-int crypto_sign(u8 *sm, u64 *smlen, const u8 *m, u64 n, const u8 *sk) {
+int crypto_sign(u8* sm, u64* smlen, const u8* m, u64 n, const u8* sk)
+{
     u8 d[64], h[64], r[64];
     i64 x[64];
     i64 p[4][16];
@@ -385,12 +477,14 @@ int crypto_sign(u8 *sm, u64 *smlen, const u8 *m, u64 n, const u8 *sk) {
     reduce(h);
     for (int i = 0; i < 64; ++i) x[i] = 0;
     for (int i = 0; i < 32; ++i) x[i] = (u64)r[i];
-    for (int i = 0; i < 32; ++i) for (int j = 0; j < 32; ++j) x[i + j] += h[i] * (u64)d[j];
+    for (int i = 0; i < 32; ++i)
+        for (int j = 0; j < 32; ++j) x[i + j] += h[i] * (u64)d[j];
     modL(sm + 32, x);
     return 0;
 }
 
-static int unpackneg(i64 r[4][16], const u8 p[32]) {
+static int unpackneg(i64 r[4][16], const u8 p[32])
+{
     i64 t[16], chk[16], num[16], den[16], den2[16], den4[16], den6[16];
     set25519(r[2], gf1);
     unpack25519(r[1], p);
@@ -419,7 +513,8 @@ static int unpackneg(i64 r[4][16], const u8 p[32]) {
     return 0;
 }
 
-int crypto_sign_open(u8 *m, u64 *mlen, const u8 *sm, u64 n, const u8 *pk) {
+int crypto_sign_open(u8* m, u64* mlen, const u8* sm, u64 n, const u8* pk)
+{
     u8 t[32], h[64];
     i64 p[4][16], q[4][16];
     *mlen = (u64)-1;
@@ -443,8 +538,9 @@ int crypto_sign_open(u8 *m, u64 *mlen, const u8 *sm, u64 n, const u8 *pk) {
     return 0;
 }
 
-int crypto_sign_detached(u8 *sig, const u8 *m, unsigned long long mlen, const u8 *sk) {
-    u8 *sm = (u8*)malloc(mlen + 64);
+int crypto_sign_detached(u8* sig, const u8* m, unsigned long long mlen, const u8* sk)
+{
+    u8* sm = (u8*)malloc(mlen + 64);
     if (!sm) return -1;
     u64 smlen;
     int rc = crypto_sign(sm, &smlen, m, mlen, sk);
@@ -455,11 +551,15 @@ int crypto_sign_detached(u8 *sig, const u8 *m, unsigned long long mlen, const u8
     return rc;
 }
 
-int crypto_sign_verify_detached(const u8 *sig, const u8 *m, unsigned long long mlen, const u8 *pk) {
-    u8 *sm = (u8*)malloc(mlen + 64);
+int crypto_sign_verify_detached(const u8* sig, const u8* m, unsigned long long mlen, const u8* pk)
+{
+    u8* sm = (u8*)malloc(mlen + 64);
     if (!sm) return -1;
-    u8 *tmp = (u8*)malloc(mlen + 64);
-    if (!tmp) { free(sm); return -1; }
+    u8* tmp = (u8*)malloc(mlen + 64);
+    if (!tmp) {
+        free(sm);
+        return -1;
+    }
     memcpy(sm, sig, 64);
     memcpy(sm + 64, m, mlen);
     u64 tmplen;

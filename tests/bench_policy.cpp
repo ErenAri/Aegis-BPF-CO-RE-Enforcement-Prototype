@@ -37,7 +37,8 @@ class PolicyBenchmark : public benchmark::Fixture {
     std::string policy_path_;
 };
 
-BENCHMARK_DEFINE_F(PolicyBenchmark, ParsePolicy)(benchmark::State& state)
+BENCHMARK_DEFINE_F(PolicyBenchmark, ParsePolicy)
+(benchmark::State& state)
 {
     for (auto _ : state) {
         PolicyIssues issues;

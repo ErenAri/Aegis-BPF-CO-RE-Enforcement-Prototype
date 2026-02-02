@@ -17,28 +17,28 @@ extern "C" {
 #define crypto_sign_PUBLICKEYBYTES 32
 #define crypto_sign_SECRETKEYBYTES 64
 
-int crypto_sign_keypair(unsigned char *pk, unsigned char *sk);
-int crypto_sign(unsigned char *sm, unsigned long long *smlen,
-                const unsigned char *m, unsigned long long mlen,
-                const unsigned char *sk);
-int crypto_sign_open(unsigned char *m, unsigned long long *mlen,
-                     const unsigned char *sm, unsigned long long smlen,
-                     const unsigned char *pk);
+int crypto_sign_keypair(unsigned char* pk, unsigned char* sk);
+int crypto_sign(unsigned char* sm, unsigned long long* smlen,
+                const unsigned char* m, unsigned long long mlen,
+                const unsigned char* sk);
+int crypto_sign_open(unsigned char* m, unsigned long long* mlen,
+                     const unsigned char* sm, unsigned long long smlen,
+                     const unsigned char* pk);
 
 /* Ed25519 detached signature functions */
-int crypto_sign_detached(unsigned char *sig,
-                         const unsigned char *m, unsigned long long mlen,
-                         const unsigned char *sk);
-int crypto_sign_verify_detached(const unsigned char *sig,
-                                const unsigned char *m, unsigned long long mlen,
-                                const unsigned char *pk);
+int crypto_sign_detached(unsigned char* sig,
+                         const unsigned char* m, unsigned long long mlen,
+                         const unsigned char* sk);
+int crypto_sign_verify_detached(const unsigned char* sig,
+                                const unsigned char* m, unsigned long long mlen,
+                                const unsigned char* pk);
 
 /* Hash function (SHA-512) */
 #define crypto_hash_BYTES 64
-int crypto_hash(unsigned char *out, const unsigned char *m, unsigned long long n);
+int crypto_hash(unsigned char* out, const unsigned char* m, unsigned long long n);
 
 /* Random bytes */
-void randombytes(unsigned char *x, unsigned long long xlen);
+void randombytes(unsigned char* x, unsigned long long xlen);
 
 #ifdef __cplusplus
 }

@@ -594,7 +594,7 @@ Result<void> add_deny_path(BpfState& state, const std::string& path, DenyEntries
         return Error(ErrorCode::PathResolutionFailed, "Failed to resolve path", path + ": " + ec.message());
     }
 
-    struct stat st{};
+    struct stat st {};
     if (stat(resolved.c_str(), &st) != 0) {
         return Error::system(errno, "stat failed for " + resolved.string());
     }
@@ -735,7 +735,7 @@ Result<void> populate_survival_allowlist(BpfState& state)
     for (int i = 0; kSurvivalBinaries[i] != nullptr; ++i) {
         const char* path = kSurvivalBinaries[i];
 
-        struct stat st{};
+        struct stat st {};
         if (stat(path, &st) != 0) {
             // Binary doesn't exist on this system, skip it
             continue;

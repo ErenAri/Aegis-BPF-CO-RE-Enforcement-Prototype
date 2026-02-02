@@ -11,7 +11,7 @@ namespace aegis {
 
 std::string get_kernel_version()
 {
-    struct utsname uts{};
+    struct utsname uts {};
     if (uname(&uts) != 0) {
         return {};
     }

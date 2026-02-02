@@ -86,7 +86,7 @@ static void heartbeat_thread(BpfState* state, uint32_t ttl_seconds)
 
     while (g_heartbeat_running.load() && !g_exiting) {
         // Calculate new deadline
-        struct timespec ts{};
+        struct timespec ts {};
         clock_gettime(CLOCK_BOOTTIME, &ts);
         uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
         uint64_t new_deadline = now_ns + (static_cast<uint64_t>(ttl_seconds) * 1000000000ULL);
@@ -121,7 +121,7 @@ static Result<void> setup_agent_cgroup(BpfState& state)
     procs << getpid();
     procs.close();
 
-    struct stat st{};
+    struct stat st {};
     if (stat(kAgentCgroup, &st) != 0) {
         return Error::system(errno, "stat failed for " + std::string(kAgentCgroup));
     }
@@ -230,7 +230,7 @@ static int run(bool audit_only,
     config.event_sample_rate = event_sample_rate ? event_sample_rate : 1;
     if (config.deadman_enabled) {
         // Set initial deadline to now + TTL
-        struct timespec ts{};
+        struct timespec ts {};
         clock_gettime(CLOCK_BOOTTIME, &ts);
         uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
         config.deadman_deadline_ns = now_ns + (static_cast<uint64_t>(deadman_ttl) * 1000000000ULL);
@@ -621,7 +621,7 @@ static int survival_verify()
     int missing = 0;
 
     for (int i = 0; binaries[i] != nullptr; ++i) {
-        struct stat st{};
+        struct stat st {};
         if (stat(binaries[i], &st) == 0) {
             std::cout << "  [OK] " << binaries[i] << " (" << encode_dev(st.st_dev) << ":" << st.st_ino << ")"
                       << std::endl;
