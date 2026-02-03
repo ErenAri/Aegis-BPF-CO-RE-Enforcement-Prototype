@@ -40,7 +40,7 @@ jobs:
           sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm linux-tools-common linux-tools-$(uname -r) || sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm linux-tools-common
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
 
       - name: Build
         run: cmake --build build
@@ -54,7 +54,13 @@ jobs:
       - name: Create release archive
         run: |
           mkdir -p release
+          if [ ! -f build/aegis.bpf.o ]; then
+            echo "missing build/aegis.bpf.o; release artifact would be non-runnable" >&2
+            exit 1
+          fi
           cp build/aegisbpf release/
+          cp build/aegis.bpf.o release/
+          cp build/aegis.bpf.sha256 release/ 2>/dev/null || true
           cp README.md LICENSE release/ 2>/dev/null || true
           cp -r packaging release/
           cp -r config release/ 2>/dev/null || true
@@ -76,6 +82,7 @@ jobs:
 
   build-arm64:
     runs-on: ubuntu-24.04
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -95,25 +102,10 @@ jobs:
             -v /sys:/sys:ro \
             -w /src \
             ubuntu:24.04 \
-            bash -lc "apt-get update && apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build && cmake -S . -B build-arm64 -G Ninja -DBUILD_TESTING=OFF -DSKIP_BPF_BUILD=ON && cmake --build build-arm64"
-
-      - name: Create release archive
-        run: |
-          mkdir -p release
-          cp build-arm64/aegisbpf release/
-          cp README.md LICENSE release/ 2>/dev/null || true
-          cp -r packaging release/
-          cp -r config release/ 2>/dev/null || true
-          tar -czvf aegisbpf-${{ steps.version.outputs.version }}-ubuntu-24.04-aarch64.tar.gz -C release .
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aegisbpf-ubuntu-24.04-aarch64
-          path: aegisbpf-*.tar.gz
+            bash -lc "apt-get update && apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build && cmake -S . -B build-arm64 -G Ninja -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF -DSKIP_BPF_BUILD=ON && cmake --build build-arm64"
 
   sign-and-release:
-    needs: [build-release, build-arm64]
+    needs: [build-release]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

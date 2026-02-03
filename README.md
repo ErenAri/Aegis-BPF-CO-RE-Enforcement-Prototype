@@ -3,28 +3,32 @@
 **AegisBPF** is an eBPF-based runtime security agent that monitors and blocks unauthorized file access using Linux Security Modules (LSM). It provides kernel-level enforcement with minimal overhead.
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                              AegisBPF                                        │
-│                                                                              │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐   │
-│   │   Block     │    │   Allow     │    │   Policy    │    │  Metrics    │   │
-│   │  deny list  │    │  allowlist  │    │  management │    │  & stats    │   │
-│   └──────┬──────┘    └──────┬──────┘    └──────┬──────┘    └──────┬──────┘   │
-│          │                  │                  │                  │          │
-│          └──────────────────┴──────────────────┴──────────────────┘          │
-│                                      │                                       │
-│                              ┌───────┴───────┐                               │
-│                              │  BPF Maps     │                               │
-│                              │  (pinned)     │                               │
-│                              └───────┬───────┘                               │
-│                                      │                                       │
-├──────────────────────────────────────┼───────────────────────────────────────┤
-│                               KERNEL │                                       │
-│                              ┌───────┴───────┐                               │
-│                              │   LSM Hook    │◄──── open() blocked here      │
-│                              │  file_open    │                               │
-│                              └───────────────┘                               │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                              AegisBPF                                         │ 
+│                                                                               │
+│   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐    ┌─────────────┐      │
+│   │  File/Net   │   │   Allow     │   │   Policy    │    │  Metrics    │      │
+│   │ deny rules  │   │  allowlist  │   │ + signatures│    │  + health   │      │
+│   └──────┬──────┘   └──────┬──────┘   └──────┬──────┘    └──────┬──────┘      │
+│          └─────────────────┴─────────────────┴──────────────────┘             │
+│                                      │                                        │
+│                              ┌───────┴────────┐                               │
+│                              │ Pinned BPF Maps│                               │
+│                              │ + Ring Buffer  │                               │
+│                              └───────┬────────┘                               │
+│                                      │                                        │
+├──────────────────────────────────────┼────────────────────────────────────────┤
+│                               KERNEL │                                        │
+│                         ┌────────────┴──────────────┐                         │
+│                         │ LSM hooks (enforce/audit) │                         │
+│                         │ file_open/inode_permission│                         │
+│                         │ socket_connect/socket_bind│                         │
+│                         └────────────┬──────────────┘                         │
+│                         ┌────────────┴─────────────┐                          │
+│                         │ Tracepoint fallback      │                          │
+│                         │ openat/exec/fork/exit    │                          │
+│                         └──────────────────────────┘                          │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Features
@@ -36,7 +40,7 @@
 - **Audit mode** - Monitor without blocking (works without BPF LSM)
 - **Prometheus metrics** - Export block counts and statistics
 - **Structured logging** - JSON or text output to stdout/journald
-- **Policy files** - Declarative configuration with SHA256 verification
+- **Policy files and signed bundles** - Declarative configuration with SHA256 verification and signature enforcement
 - **Kubernetes ready** - Helm chart for DaemonSet deployment
 
 ## Architecture
@@ -50,7 +54,7 @@
 │  │                                                                         │ │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │ │
 │  │  │  CLI     │  │  Policy  │  │  Event   │  │ Metrics  │  │ Logging  │   │ │
-│  │  │ Parser   │  │ Manager  │  │ Handler  │  │ Exporter │  │ (JSON)   │   │ │
+│  │  │ Dispatch │  │ + Sign   │  │ Handler  │  │ + Health │  │ (JSON)   │   │ │
 │  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │ │
 │  │       │             │             │             │             │         │ │
 │  │       └─────────────┴─────────────┴─────────────┴─────────────┘         │ │
@@ -68,24 +72,24 @@
 │  ┌───────────────────────────────────┴───────────────────────────────────┐   │
 │  │                          BPF Subsystem                                │   │
 │  │                                                                       │   │
-│  │  ┌────────────────┐    ┌────────────────┐    ┌────────────────────┐   │   │
-│  │  │   LSM Hook     │    │   Tracepoint   │    │     BPF Maps       │   │   │
-│  │  │  file_open     │    │ openat/exec    │    │                    │   │   │
-│  │  │                │    │                │    │  ┌──────────────┐  │   │   │
-│  │  │  ┌──────────┐  │    │  ┌──────────┐  │    │  │ deny_inode   │  │   │   │
-│  │  │  │ ENFORCE  │  │    │  │  AUDIT   │  │    │  │ deny_path    │  │   │   │
-│  │  │  │  MODE    │  │    │  │  MODE    │  │    │  │ allow_cgroup │  │   │   │
-│  │  │  └──────────┘  │    │  └──────────┘  │    │  │ events (rb)  │  │   │   │
-│  │  └───────┬────────┘    └───────┬────────┘    │  │ block_stats  │  │   │   │
-│  │          │                     │             │  └──────────────┘  │   │   │
-│  │          │     Ring Buffer     │             │                    │   │   │
-│  │          └─────────────────────┴─────────────┴────────────────────┘   │   │
+│  │  ┌───────────────────────────────┐  ┌───────────────────────────────┐ │   │
+│  │  │   LSM Hooks                   │  │   Tracepoint Fallback         │ │   │
+│  │  │ file_open / inode_permission  │  │ openat / exec / fork / exit   │ │   │
+│  │  │ socket_connect / socket_bind  │  │ (audit path when no BPF LSM)  │ │   │
+│  │  └───────────────┬───────────────┘  └──────────────┬────────────────┘ │   │
+│  │                  └───────────────┬─────────────────┘                  │   │
+│  │                                  ▼                                    │   │
+│  │                         ┌──────────────────────┐                      │   │
+│  │                         │      BPF Maps        │                      │   │
+│  │                         │ deny_* / allow_*     │                      │   │
+│  │                         │ net_* / survival_*   │                      │   │
+│  │                         │ agent_meta / stats   │                      │   │
+│  │                         │ events ring buffer    │                     │   │
+│  │                         └──────────────────────┘                      │   │
 │  └───────────────────────────────────────────────────────────────────────┘   │
 │                                      │                                       │
 │                                      ▼                                       │
-│                              ┌───────────────┐                               │
-│                              │   open()      │                               │
-│                              └───────────────┘                               │
+│                     file/network ops allowed, audited, or blocked            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -148,24 +152,20 @@ sudo ./build/aegisbpf run --audit --ringbuf-bytes=67108864 --event-sample-rate=1
          │  open("/etc/shadow")       │                            │
          │ ──────────────────────────►│                            │
          │                            │                            │
-         │                            │  LSM: file_open            │
+         │                            │  LSM: file_open / inode_permission
          │                            │ ──────────────────────────►│
          │                            │                            │
-         │                            │    ┌────────────────────┐  │
-         │                            │    │ Check allow_cgroup │  │
-         │                            │    │     (ALLOWED?)     │  │
-         │                            │    └─────────┬──────────┘  │
-         │                            │              │             │
-         │                            │              ▼ NO          │
-         │                            │    ┌────────────────────┐  │
-         │                            │    │  Check deny_inode  │  │
-         │                            │    │    (BLOCKED?)      │  │
-         │                            │    └─────────┬──────────┘  │
-         │                            │              │             │
-         │                            │              ▼ NO          │
-         │                            │◄─────────────┘             │
-         │                            │   Return 0 (allow)         │
-         │                            │   or -EPERM (deny)         │
+         │                            │    allow_cgroup? ----------► allow
+         │                            │            │
+         │                            │            ▼
+         │                            │       deny_inode?
+         │                            │            │
+         │                            │            ▼
+         │                            │     survival_allowlist? ---> allow
+         │                            │            │
+         │                            │            ▼
+         │                            │   audit mode -> emit event, allow
+         │                            │   enforce    -> SIGKILL + -EPERM
          │                            │                            │
          │  Success / EPERM           │                            │
          │ ◄──────────────────────────│                            │
@@ -262,6 +262,9 @@ sudo aegisbpf policy lint /etc/aegisbpf/policy.conf
 # Apply with SHA256 verification
 sudo aegisbpf policy apply /etc/aegisbpf/policy.conf --sha256 abc123...
 
+# Apply signed bundle (recommended for production)
+sudo aegisbpf policy apply /etc/aegisbpf/policy.signed --require-signature
+
 # Export current rules
 sudo aegisbpf policy export /tmp/current.conf
 
@@ -327,8 +330,17 @@ helm install aegisbpf ./helm/aegisbpf \
 
 ```bash
 sudo cmake --install build
+sudo systemctl daemon-reload
 sudo systemctl enable --now aegisbpf
 ```
+
+`/etc/default/aegisbpf` defaults to:
+
+- `AEGIS_REQUIRE_SIGNATURE=1`
+- `AEGIS_POLICY=` (empty, service starts without applying a startup policy)
+
+For production, set `AEGIS_POLICY` to a signed policy bundle path (for example
+`/etc/aegisbpf/policy.signed`) and keep signature enforcement enabled.
 
 ## Data Flow Diagram
 
@@ -338,8 +350,8 @@ sudo systemctl enable --now aegisbpf
 └─────────────────────────────────────────────────────────────────────────────┘
 
                     ┌─────────────────────────────────┐
-                    │         Policy File             │
-                    │   /etc/aegisbpf/policy.conf     │
+                    │      Policy bundle/rules        │
+                    │ /etc/aegisbpf/policy.signed     │
                     └───────────────┬─────────────────┘
                                     │
                                     ▼
@@ -351,27 +363,26 @@ sudo systemctl enable --now aegisbpf
                                     │
                                     │ bpf() syscall
                                     ▼
-                    ┌───────────────────────────────┐
-                    │         BPF Maps              │
-                    │   /sys/fs/bpf/aegis/          │
-                    │                               │
-                    │  ┌─────────────────────────┐  │
-                    │  │ deny_inode   (hash map) │  │
-                    │  │ deny_path    (hash map) │  │
-                    │  │ allow_cgroup (hash map) │  │
-                    │  │ events       (ring buf) │  │
-                    │  │ block_stats  (array)    │  │
-                    │  └─────────────────────────┘  │
-                    └───────────────┬───────────────┘
+                    ┌────────────────────────────────┐
+                    │         BPF Maps               │
+                    │   /sys/fs/bpf/aegis/           │
+                    │                                │
+                    │  ┌──────────────────────────┐  │
+                    │  │ deny_* / allow_cgroup    │  │
+                    │  │ deny_ipv4/deny_cidr/port │  │
+                    │  │ net_* stats + block_stats│  │
+                    │  │ survival_allowlist/meta  │  │
+                    │  │ events       (ring buf)  │  │
+                    │  └──────────────────────────┘  │
+                    └───────────────┬────────────────┘
                                     │
                                     ▼
-                    ┌───────────────────────────────┐
-                    │      BPF LSM Program          │
-                    │      (kernel space)           │
-                    │                               │
-                    │   open() ───► check maps      │
-                    │              ──► allow/deny   │
-                    └───────────────────────────────┘
+            ┌──────────────────────────────────────────────┐
+            │ BPF hooks (kernel)                           │
+            │ - file_open/inode_permission                 │
+            │ - socket_connect/socket_bind                 │
+            │ - openat/exec/fork/exit tracepoints fallback │
+            └──────────────────────────────────────────────┘
 ```
 
 ## Metrics
@@ -387,6 +398,11 @@ AegisBPF exports Prometheus-compatible metrics:
 | `aegisbpf_allow_cgroup_entries` | gauge | Number of allowed cgroups |
 | `aegisbpf_blocks_by_cgroup_total` | counter | Blocks per cgroup |
 | `aegisbpf_blocks_by_path_total` | counter | Blocks per file path |
+| `aegisbpf_net_blocks_total` | counter | Blocked network operations by type (`connect`/`bind`) |
+| `aegisbpf_net_ringbuf_drops_total` | counter | Dropped network events |
+| `aegisbpf_net_blocks_by_ip_total` | counter | Blocked network operations per destination IP |
+| `aegisbpf_net_blocks_by_port_total` | counter | Blocked network operations per destination port |
+| `aegisbpf_net_rules_total` | gauge | Active network deny rules by type (`ip`/`cidr`/`port`) |
 
 ## Security Hardening
 

@@ -8,6 +8,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(GNUInstallDirs)
 
+# Match packaged/systemd paths unless caller overrides explicitly.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install prefix" FORCE)
+endif()
+
 # Build options
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
@@ -449,8 +454,8 @@ endif()
 
 # Installation
 install(TARGETS aegisbpf RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES ${BPF_OBJECT} DESTINATION ${CMAKE_INSTALL_LIBDIR}/aegisbpf)
 if(NOT SKIP_BPF_BUILD)
+    install(FILES ${BPF_OBJECT} DESTINATION ${CMAKE_INSTALL_LIBDIR}/aegisbpf)
     install(FILES ${BPF_HASH_FILE} DESTINATION ${CMAKE_INSTALL_LIBDIR}/aegisbpf RENAME aegis.bpf.sha256)
 endif()
 install(FILES packaging/systemd/aegisbpf.service DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/system)
@@ -464,6 +469,7 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AegisBPF runtime security agent")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_CONTACT "aegisbpf@localhost")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+set(CPACK_SET_DESTDIR ON)
 set(CPACK_GENERATOR "TGZ")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libbpf1 | libbpf0")
