@@ -428,6 +428,9 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening details
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and internals |
+| [PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) | Production gates and evidence checklist |
+| [KEY_MANAGEMENT.md](docs/KEY_MANAGEMENT.md) | Policy signing key rotation and revocation runbook |
+| [SUPPORT_POLICY.md](docs/SUPPORT_POLICY.md) | Supported versions, compatibility, and deprecation guarantees |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 | [SIEM_INTEGRATION.md](docs/SIEM_INTEGRATION.md) | Splunk, ELK, QRadar integration |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Version history |

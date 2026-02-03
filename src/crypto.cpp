@@ -4,6 +4,7 @@
 #include "sha256.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -18,7 +19,7 @@ namespace aegis {
 
 namespace {
 
-constexpr const char* kKeysDir = "/etc/aegisbpf/keys";
+constexpr const char* kDefaultKeysDir = "/etc/aegisbpf/keys";
 constexpr const char* kBundleHeader = "AEGIS-POLICY-BUNDLE-V1";
 constexpr const char* kBundleSeparator = "---";
 
@@ -83,6 +84,24 @@ bool parse_header_line(const std::string& line, std::string& key, std::string& v
 }
 
 }  // anonymous namespace
+
+std::string trusted_keys_dir()
+{
+    const char* env = std::getenv("AEGIS_KEYS_DIR");
+    if (env && *env) {
+        return std::string(env);
+    }
+    return kDefaultKeysDir;
+}
+
+std::string version_counter_path()
+{
+    const char* env = std::getenv("AEGIS_VERSION_COUNTER_PATH");
+    if (env && *env) {
+        return std::string(env);
+    }
+    return kVersionCounterPath;
+}
 
 // cppcheck-suppress unusedFunction
 Result<std::pair<PublicKey, SecretKey>> generate_keypair()
@@ -328,14 +347,15 @@ Result<void> verify_bundle(const SignedPolicyBundle& bundle,
 Result<std::vector<PublicKey>> load_trusted_keys()
 {
     std::vector<PublicKey> keys;
+    const std::string keys_dir = trusted_keys_dir();
 
     std::error_code ec;
-    if (!std::filesystem::exists(kKeysDir, ec)) {
+    if (!std::filesystem::exists(keys_dir, ec)) {
         // No keys directory - return empty list
         return keys;
     }
 
-    for (const auto& entry : std::filesystem::directory_iterator(kKeysDir, ec)) {
+    for (const auto& entry : std::filesystem::directory_iterator(keys_dir, ec)) {
         if (entry.path().extension() != ".pub") {
             continue;
         }
@@ -359,7 +379,7 @@ Result<std::vector<PublicKey>> load_trusted_keys()
 
 uint64_t read_version_counter()
 {
-    std::ifstream in(kVersionCounterPath);
+    std::ifstream in(version_counter_path());
     if (!in.is_open()) {
         return 0;
     }
@@ -371,13 +391,18 @@ uint64_t read_version_counter()
 
 Result<void> write_version_counter(uint64_t version)
 {
+    const std::filesystem::path version_path = version_counter_path();
+    const std::filesystem::path version_parent = version_path.parent_path();
+
     std::error_code ec;
-    std::filesystem::create_directories(kDenyDbDir, ec);
-    if (ec) {
-        return Error(ErrorCode::IoError, "Failed to create database directory", ec.message());
+    if (!version_parent.empty()) {
+        std::filesystem::create_directories(version_parent, ec);
+        if (ec) {
+            return Error(ErrorCode::IoError, "Failed to create version directory", ec.message());
+        }
     }
 
-    std::ofstream out(kVersionCounterPath, std::ios::trunc);
+    std::ofstream out(version_path, std::ios::trunc);
     if (!out.is_open()) {
         return Error(ErrorCode::IoError, "Failed to open version counter file");
     }

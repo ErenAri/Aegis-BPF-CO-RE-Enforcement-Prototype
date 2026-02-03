@@ -16,6 +16,34 @@
 
 namespace aegis {
 
+namespace {
+
+std::string env_or_default_path(const char* env_name, const char* fallback)
+{
+    const char* env = std::getenv(env_name);
+    if (env && *env) {
+        return std::string(env);
+    }
+    return fallback;
+}
+
+std::string policy_applied_path()
+{
+    return env_or_default_path("AEGIS_POLICY_APPLIED_PATH", kPolicyAppliedPath);
+}
+
+std::string policy_applied_prev_path()
+{
+    return env_or_default_path("AEGIS_POLICY_APPLIED_PREV_PATH", kPolicyAppliedPrevPath);
+}
+
+std::string policy_applied_hash_path()
+{
+    return env_or_default_path("AEGIS_POLICY_APPLIED_HASH_PATH", kPolicyAppliedHashPath);
+}
+
+}  // namespace
+
 void report_policy_issues(const PolicyIssues& issues)
 {
     for (const auto& err : issues.errors) {
@@ -255,15 +283,19 @@ Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues)
 
 Result<void> record_applied_policy(const std::string& path, const std::string& hash)
 {
+    const std::string applied_path = policy_applied_path();
+    const std::string applied_prev_path = policy_applied_prev_path();
+    const std::string applied_hash_path = policy_applied_hash_path();
+
     auto db_result = ensure_db_dir();
     if (!db_result) {
         return db_result.error();
     }
 
     std::error_code ec;
-    if (std::filesystem::exists(kPolicyAppliedPath, ec)) {
+    if (std::filesystem::exists(applied_path, ec)) {
         std::filesystem::copy_file(
-            kPolicyAppliedPath, kPolicyAppliedPrevPath,
+            applied_path, applied_prev_path,
             std::filesystem::copy_options::overwrite_existing, ec);
         if (ec) {
             return Error(ErrorCode::IoError, "Failed to backup applied policy", ec.message());
@@ -274,7 +306,7 @@ Result<void> record_applied_policy(const std::string& path, const std::string& h
     if (!in.is_open()) {
         return Error::system(errno, "Failed to open policy file for recording");
     }
-    std::ofstream out(kPolicyAppliedPath, std::ios::trunc);
+    std::ofstream out(applied_path, std::ios::trunc);
     if (!out.is_open()) {
         return Error::system(errno, "Failed to open applied policy file for writing");
     }
@@ -284,7 +316,7 @@ Result<void> record_applied_policy(const std::string& path, const std::string& h
     }
 
     if (!hash.empty()) {
-        std::ofstream hout(kPolicyAppliedHashPath, std::ios::trunc);
+        std::ofstream hout(applied_hash_path, std::ios::trunc);
         if (!hout.is_open()) {
             return Error::system(errno, "Failed to open policy hash file for writing");
         }
@@ -292,7 +324,7 @@ Result<void> record_applied_policy(const std::string& path, const std::string& h
     }
     else {
         std::error_code rm_ec;
-        std::filesystem::remove(kPolicyAppliedHashPath, rm_ec);
+        std::filesystem::remove(applied_hash_path, rm_ec);
         if (rm_ec) {
             return Error(ErrorCode::IoError, "Failed to remove policy hash file", rm_ec.message());
         }
@@ -341,7 +373,7 @@ Result<void> policy_lint(const std::string& path)
     return {};
 }
 
-Result<void> apply_policy_internal(const std::string& path, const std::string& computed_hash, bool reset, bool record)
+Result<void> apply_policy_internal_impl_fn(const std::string& path, const std::string& computed_hash, bool reset, bool record)
 {
     PolicyIssues issues;
     auto policy_result = parse_policy_file(path, issues);
@@ -444,9 +476,28 @@ Result<void> apply_policy_internal(const std::string& path, const std::string& c
     return {};
 }
 
+static ApplyPolicyInternalFn g_apply_policy_internal_fn = apply_policy_internal_impl_fn;
+
+Result<void> apply_policy_internal(const std::string& path, const std::string& computed_hash, bool reset, bool record)
+{
+    return g_apply_policy_internal_fn(path, computed_hash, reset, record);
+}
+
+void set_apply_policy_internal_for_test(ApplyPolicyInternalFn fn)
+{
+    g_apply_policy_internal_fn = fn ? fn : apply_policy_internal_impl_fn;
+}
+
+void reset_apply_policy_internal_for_test()
+{
+    g_apply_policy_internal_fn = apply_policy_internal_impl_fn;
+}
+
 Result<void> policy_apply(const std::string& path, bool reset, const std::string& cli_hash,
                           const std::string& cli_hash_file, bool rollback_on_failure)
 {
+    const std::string applied_path = policy_applied_path();
+
     std::string expected_hash = cli_hash;
     std::string hash_file = cli_hash_file;
 
@@ -467,7 +518,16 @@ Result<void> policy_apply(const std::string& path, bool reset, const std::string
         return Error(ErrorCode::InvalidArgument, "Provide either --sha256 or --sha256-file (not both)");
     }
 
+    auto policy_perms = validate_file_permissions(path, false);
+    if (!policy_perms) {
+        return policy_perms.error();
+    }
+
     if (!hash_file.empty()) {
+        auto hash_perms = validate_file_permissions(hash_file, false);
+        if (!hash_perms) {
+            return hash_perms.error();
+        }
         if (!read_sha256_file(hash_file, expected_hash)) {
             return Error(ErrorCode::IoError, "Failed to read sha256 file", hash_file);
         }
@@ -493,9 +553,9 @@ Result<void> policy_apply(const std::string& path, bool reset, const std::string
     auto result = apply_policy_internal(path, computed_hash, reset, true);
     if (!result && rollback_on_failure) {
         std::error_code ec;
-        if (std::filesystem::exists(kPolicyAppliedPath, ec)) {
+        if (std::filesystem::exists(applied_path, ec)) {
             logger().log(SLOG_WARN("Apply failed; rolling back to last applied policy"));
-            auto rollback_result = apply_policy_internal(kPolicyAppliedPath, std::string(), true, false);
+            auto rollback_result = apply_policy_internal(applied_path, std::string(), true, false);
             if (!rollback_result) {
                 logger().log(SLOG_ERROR("Rollback failed; maps may be inconsistent")
                                  .field("error", rollback_result.error().to_string()));
@@ -582,11 +642,14 @@ Result<void> policy_export(const std::string& path)
 
 Result<void> policy_show()
 {
-    std::ifstream in(kPolicyAppliedPath);
+    const std::string applied_path = policy_applied_path();
+    const std::string applied_hash_path = policy_applied_hash_path();
+
+    std::ifstream in(applied_path);
     if (!in.is_open()) {
-        return Error(ErrorCode::ResourceNotFound, "No applied policy found", kPolicyAppliedPath);
+        return Error(ErrorCode::ResourceNotFound, "No applied policy found", applied_path);
     }
-    std::string hash = read_file_first_line(kPolicyAppliedHashPath);
+    std::string hash = read_file_first_line(applied_hash_path);
     if (!hash.empty()) {
         std::cout << "# applied_sha256: " << hash << "\n";
     }
@@ -596,12 +659,14 @@ Result<void> policy_show()
 
 Result<void> policy_rollback()
 {
-    if (!std::filesystem::exists(kPolicyAppliedPrevPath)) {
-        return Error(ErrorCode::ResourceNotFound, "No rollback policy found", kPolicyAppliedPrevPath);
+    const std::string applied_prev_path = policy_applied_prev_path();
+
+    if (!std::filesystem::exists(applied_prev_path)) {
+        return Error(ErrorCode::ResourceNotFound, "No rollback policy found", applied_prev_path);
     }
     std::string computed_hash;
-    sha256_file_hex(kPolicyAppliedPrevPath, computed_hash);
-    return apply_policy_internal(kPolicyAppliedPrevPath, computed_hash, true, true);
+    sha256_file_hex(applied_prev_path, computed_hash);
+    return apply_policy_internal(applied_prev_path, computed_hash, true, true);
 }
 
 }  // namespace aegis

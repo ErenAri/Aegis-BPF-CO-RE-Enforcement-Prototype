@@ -105,11 +105,8 @@ Display agent statistics.
 **aegisbpf stats**
 
 Shows:
-- Number of deny entries (inode and path based)
-- Number of allow cgroup entries
 - Total block count
 - Ring buffer drop count
-- Per-cgroup and per-path block counts
 
 ### metrics
 
@@ -120,20 +117,36 @@ Output Prometheus-format metrics.
 **--out** *PATH*
 :   Write metrics to file instead of stdout. Use "-" for stdout (default).
 
+Exported metrics:
+- `aegisbpf_blocks_total`
+- `aegisbpf_ringbuf_drops_total`
+- `aegisbpf_blocks_by_cgroup_total{cgroup_id,cgroup_path}`
+- `aegisbpf_blocks_by_inode_total{inode}`
+- `aegisbpf_blocks_by_path_total{path}`
+- `aegisbpf_deny_inode_entries`
+- `aegisbpf_deny_path_entries`
+- `aegisbpf_allow_cgroup_entries`
+- `aegisbpf_net_blocks_total{type}`
+- `aegisbpf_net_ringbuf_drops_total`
+- `aegisbpf_net_blocks_by_ip_total{ip}`
+- `aegisbpf_net_blocks_by_port_total{port}`
+- `aegisbpf_net_rules_total{type}`
+
 ### health
 
 Check agent prerequisites and status.
 
-**aegisbpf health**
+**aegisbpf health** [**--json**]
 
 Checks:
-- Cgroup v2 availability
-- BPF filesystem mount
-- BTF availability
-- BPF object file presence
-- BPF LSM enablement
-- Kernel configuration
-- Pin status (when root)
+- Kernel capability summary (full vs audit-only)
+- Cgroup v2, BPF syscall, bpffs, and BTF prerequisites
+- Required pinned map accessibility
+- Optional network pinned map accessibility (when network maps are present)
+- BPF object load and pinned map layout compatibility
+
+**--json**
+:   Emit a machine-readable status object with feature flags and per-check booleans.
 
 ## POLICY FILE FORMAT
 
@@ -159,8 +172,29 @@ cgid:123456
 
 ## ENVIRONMENT
 
-**AEGIS_BPF_OBJ_PATH**
+**AEGIS_BPF_OBJ**
 :   Override the path to the BPF object file.
+
+**AEGIS_KEYS_DIR**
+:   Override trusted key directory (default: `/etc/aegisbpf/keys`).
+
+**AEGIS_VERSION_COUNTER_PATH**
+:   Override signed-policy version counter file (default: `/var/lib/aegisbpf/version_counter`).
+
+**AEGIS_POLICY_APPLIED_PATH**
+:   Override applied policy snapshot path.
+
+**AEGIS_POLICY_APPLIED_PREV_PATH**
+:   Override rollback policy snapshot path.
+
+**AEGIS_POLICY_APPLIED_HASH_PATH**
+:   Override applied policy hash snapshot path.
+
+**AEGIS_POLICY_SHA256**
+:   Expected policy SHA256 for `policy apply` when hash flags are not passed.
+
+**AEGIS_POLICY_SHA256_FILE**
+:   Path to SHA256 checksum file for `policy apply` when hash flags are not passed.
 
 ## FILES
 

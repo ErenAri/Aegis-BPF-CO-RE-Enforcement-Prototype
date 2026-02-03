@@ -64,6 +64,19 @@ cosign verify-blob \
   aegisbpf-*.tar.gz
 ```
 
+### Policy Signing Key Operations
+
+Use the dedicated runbook for key rotation and revocation:
+
+- `docs/KEY_MANAGEMENT.md`
+- `scripts/sign_policy_external.sh` (KMS/HSM-style external signer workflow)
+
+In production, prefer signed policy bundles plus:
+
+- `aegisbpf policy apply --require-signature`
+- periodic key rotation
+- revocation drills and incident evidence capture
+
 ## Security Best Practices
 
 ### Deployment

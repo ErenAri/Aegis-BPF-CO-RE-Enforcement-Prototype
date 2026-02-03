@@ -28,20 +28,13 @@ Recovery:
 4. Start the service.
 
 ## Policy format versions
-Current policy format is `version=1`.
+Current policy formats are `version=1` and `version=2`.
 - Validate new files with `policy lint` before applying.
 - For risky changes, roll out in audit mode first by setting
   `AEGIS_MODE=--audit` in `/etc/default/aegisbpf`.
 
 ## Versioning and deprecation policy
-- Semantic Versioning (SemVer): `MAJOR.MINOR.PATCH`.
-  - MAJOR: breaking changes to CLI, policy format, or event schema.
-  - MINOR: new features, backward-compatible behavior changes.
-  - PATCH: bug fixes only.
-- Support window: the current minor release (N) and previous minor release (N-1)
-  receive security and critical bug fixes.
-- Deprecations are announced in release notes and kept for at least two MINOR
-  releases before removal.
+See `docs/SUPPORT_POLICY.md`.
 
 ## Rollback
 - Policy rollback: `sudo aegisbpf policy rollback`

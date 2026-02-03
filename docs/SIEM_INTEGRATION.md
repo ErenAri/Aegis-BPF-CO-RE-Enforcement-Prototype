@@ -204,7 +204,17 @@ For metrics-based monitoring, use the built-in Prometheus endpoint:
 aegisbpf metrics --out /var/lib/prometheus/node-exporter/aegisbpf.prom
 ```
 
+Key metrics include:
+- `aegisbpf_blocks_total`, `aegisbpf_ringbuf_drops_total`
+- `aegisbpf_blocks_by_cgroup_total`, `aegisbpf_blocks_by_path_total`
+- `aegisbpf_net_blocks_total`, `aegisbpf_net_ringbuf_drops_total`
+- `aegisbpf_net_rules_total`
+
 See [prometheus/alerts.yml](../config/prometheus/alerts.yml) for alert rules and [grafana/dashboard.json](../config/grafana/dashboard.json) for the Grafana dashboard.
+
+Recommended SLO alerts:
+- `AegisBPFEventLossSLOViolation` (event-loss ratio > 0.1%)
+- `AegisBPFMetricsStale` (no updates for >30m with active policy)
 
 ## QRadar Integration
 

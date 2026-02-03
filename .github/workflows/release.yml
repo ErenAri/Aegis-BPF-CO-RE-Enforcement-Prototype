@@ -9,6 +9,7 @@ permissions:
   contents: write
   id-token: write  # Required for Sigstore keyless signing
   packages: write
+  attestations: write
 
 jobs:
   build-release:
@@ -30,16 +31,25 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Set SOURCE_DATE_EPOCH
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build linux-tools-common linux-tools-$(uname -r) || sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build linux-tools-common
+          sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm linux-tools-common linux-tools-$(uname -r) || sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm linux-tools-common
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 
       - name: Build
         run: cmake --build build
+
+      - name: Build DEB/RPM packages
+        run: |
+          cd build
+          cpack -G DEB
+          cpack -G RPM
 
       - name: Create release archive
         run: |
@@ -49,12 +59,20 @@ jobs:
           cp -r packaging release/
           cp -r config release/ 2>/dev/null || true
           tar -czvf aegisbpf-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz -C release .
+          shopt -s nullglob
+          for pkg in build/*.deb build/*.rpm; do
+            cp "${pkg}" .
+          done
+          ls -1 *.deb *.rpm 2>/dev/null || true
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: aegisbpf-${{ matrix.os }}-${{ matrix.arch }}
-          path: aegisbpf-*.tar.gz
+          path: |
+            aegisbpf-*.tar.gz
+            *.deb
+            *.rpm
 
   build-arm64:
     runs-on: ubuntu-24.04
@@ -64,6 +82,9 @@ jobs:
       - name: Get version from tag
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Set SOURCE_DATE_EPOCH
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
 
       - uses: docker/setup-qemu-action@v3
 
@@ -106,6 +127,8 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -name '*.tar.gz' -exec mv {} release/ \;
+          find artifacts -name '*.deb' -exec mv {} release/ \;
+          find artifacts -name '*.rpm' -exec mv {} release/ \;
           ls -la release/
 
       - name: Install Cosign
@@ -117,13 +140,29 @@ jobs:
       - name: Generate checksums
         run: |
           cd release
-          sha256sum *.tar.gz > SHA256SUMS.txt
+          shopt -s nullglob
+          files=(*.tar.gz *.deb *.rpm)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no release payload files found" >&2
+            exit 1
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      - name: Generate build provenance attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/*.deb
+            release/*.rpm
+            release/SHA256SUMS.txt
 
       - name: Sign artifacts with Cosign (keyless)
         run: |
           cd release
-          for file in *.tar.gz SHA256SUMS.txt; do
+          shopt -s nullglob
+          for file in *.tar.gz *.deb *.rpm SHA256SUMS.txt; do
             cosign sign-blob --yes --output-signature "${file}.sig" --output-certificate "${file}.pem" "$file"
           done
 
@@ -167,6 +206,10 @@ jobs:
             ### Checksums
 
             SHA256 checksums for all artifacts are provided in `SHA256SUMS.txt`.
+
+            ### Packages
+
+            Debian (`.deb`) and RPM (`.rpm`) packages are attached and signed.
 
   docker:
     needs: [build-release]

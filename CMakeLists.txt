@@ -136,7 +136,16 @@ endif()
 # Userspace source files
 set(AEGIS_SOURCES
     src/main.cpp
-    src/commands.cpp
+    src/cli_common.cpp
+    src/cli_dispatch.cpp
+    src/cli_network.cpp
+    src/cli_policy.cpp
+    src/cli_run.cpp
+    src/commands_block_allow.cpp
+    src/commands_network.cpp
+    src/commands_policy.cpp
+    src/commands_keys_survival.cpp
+    src/commands_monitoring.cpp
     src/daemon.cpp
     src/bpf_ops.cpp
     src/crypto.cpp
@@ -151,6 +160,16 @@ set(AEGIS_SOURCES
 )
 
 set(AEGIS_HEADERS
+    src/cli_common.hpp
+    src/cli_dispatch.hpp
+    src/cli_network.hpp
+    src/cli_policy.hpp
+    src/cli_run.hpp
+    src/commands_block_allow.hpp
+    src/commands_keys_survival.hpp
+    src/commands_monitoring.hpp
+    src/commands_network.hpp
+    src/commands_policy.hpp
     src/commands.hpp
     src/daemon.hpp
     src/bpf_ops.hpp
@@ -192,11 +211,17 @@ if (SYSTEMD_FOUND)
     target_link_libraries(aegisbpf PRIVATE ${SYSTEMD_LIBRARIES})
 endif()
 
-target_compile_definitions(aegisbpf PRIVATE AEGIS_BPF_OBJ_PATH="${BPF_OBJECT}")
+set(AEGIS_BPF_OBJ_DEFINE_PATH "${BPF_OBJECT}" CACHE STRING
+    "Path embedded into binaries for default BPF object lookup")
+target_compile_definitions(aegisbpf PRIVATE AEGIS_BPF_OBJ_PATH="${AEGIS_BPF_OBJ_DEFINE_PATH}")
 
 # Build library for testing (without main)
 set(AEGIS_LIB_SOURCES
-    src/commands.cpp
+    src/commands_block_allow.cpp
+    src/commands_network.cpp
+    src/commands_policy.cpp
+    src/commands_keys_survival.cpp
+    src/commands_monitoring.cpp
     src/daemon.cpp
     src/bpf_ops.cpp
     src/crypto.cpp
@@ -218,7 +243,7 @@ target_include_directories(aegisbpf_lib PUBLIC
 )
 target_link_directories(aegisbpf_lib PUBLIC ${LIBBPF_LIBRARY_DIRS})
 target_link_libraries(aegisbpf_lib PUBLIC ${LIBBPF_LIBRARIES})
-target_compile_definitions(aegisbpf_lib PRIVATE AEGIS_BPF_OBJ_PATH="${BPF_OBJECT}")
+target_compile_definitions(aegisbpf_lib PRIVATE AEGIS_BPF_OBJ_PATH="${AEGIS_BPF_OBJ_DEFINE_PATH}")
 
 if (SYSTEMD_FOUND)
     target_compile_definitions(aegisbpf_lib PRIVATE HAVE_SYSTEMD)
@@ -244,6 +269,7 @@ if(BUILD_TESTING)
     # Test sources
     set(TEST_SOURCES
         tests/test_main.cpp
+        tests/test_commands.cpp
         tests/test_utils.cpp
         tests/test_result.cpp
         tests/test_sha256.cpp
@@ -294,6 +320,91 @@ if(BUILD_TESTING)
             --schema ${CMAKE_CURRENT_SOURCE_DIR}/config/event-schema.json
             --samples ${CMAKE_CURRENT_SOURCE_DIR}/tests/event_samples
     )
+
+    add_test(
+        NAME systemd_policy_prestart_fails_closed
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_systemd_policy_prestart.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/packaging/systemd/aegisbpf.service
+    )
+
+    add_test(
+        NAME metrics_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_metrics_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/commands_monitoring.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/prometheus/alerts.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/grafana/dashboard.json
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/man/aegisbpf.1.md
+    )
+
+    add_test(
+        NAME slo_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_slo_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/prometheus/alerts.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PRODUCT.md
+    )
+
+    add_test(
+        NAME upgrade_compat_n_minus_1
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_upgrade_compat.py
+            $<TARGET_FILE:aegisbpf>
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/upgrade/policy_v1.conf
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/upgrade/policy_v2.conf
+    )
+
+    add_test(
+        NAME support_policy_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_support_policy.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/SUPPORT_POLICY.md
+    )
+
+    # CLI parser regressions (should fail before any privileged/BPF operations)
+    add_test(
+        NAME cli_network_deny_rejects_multiple_selectors
+        COMMAND $<TARGET_FILE:aegisbpf> network deny add --ip 192.168.1.1 --cidr 10.0.0.0/8
+    )
+    set_tests_properties(cli_network_deny_rejects_multiple_selectors PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_network_deny_rejects_port_zero
+        COMMAND $<TARGET_FILE:aegisbpf> network deny add --port 0
+    )
+    set_tests_properties(cli_network_deny_rejects_port_zero PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_network_deny_rejects_bad_protocol
+        COMMAND $<TARGET_FILE:aegisbpf> network deny add --port 443 --protocol invalid
+    )
+    set_tests_properties(cli_network_deny_rejects_bad_protocol PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_network_deny_del_rejects_bad_direction
+        COMMAND $<TARGET_FILE:aegisbpf> network deny del --port 443 --direction invalid
+    )
+    set_tests_properties(cli_network_deny_del_rejects_bad_direction PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_policy_apply_rejects_conflicting_hash_flags
+        COMMAND $<TARGET_FILE:aegisbpf> policy apply /tmp/policy.conf --sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --sha256-file /tmp/policy.sha256
+    )
+    set_tests_properties(cli_policy_apply_rejects_conflicting_hash_flags PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_metrics_rejects_unknown_flag
+        COMMAND $<TARGET_FILE:aegisbpf> metrics --invalid
+    )
+    set_tests_properties(cli_metrics_rejects_unknown_flag PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_health_rejects_extra_args
+        COMMAND $<TARGET_FILE:aegisbpf> health unexpected
+    )
+    set_tests_properties(cli_health_rejects_extra_args PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_health_json_rejects_unknown_flag
+        COMMAND $<TARGET_FILE:aegisbpf> health --json --unknown
+    )
+    set_tests_properties(cli_health_json_rejects_unknown_flag PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # Fuzzing targets

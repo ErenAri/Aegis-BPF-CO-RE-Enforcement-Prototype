@@ -117,7 +117,7 @@ sudo setcap cap_sys_admin,cap_bpf,cap_perfmon+eip /usr/bin/aegisbpf
 ls -la /usr/lib/aegisbpf/aegis.bpf.o
 
 # Set custom path if needed
-export AEGIS_BPF_OBJ_PATH=/path/to/aegis.bpf.o
+export AEGIS_BPF_OBJ=/path/to/aegis.bpf.o
 ```
 
 ### 3. "Ring buffer poll failed"

@@ -1,0 +1,40 @@
+name: Incident Drill
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 1 * *"
+
+jobs:
+  incident-drill:
+    runs-on: [self-hosted, bpf-lsm]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (if apt-get is available)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+          fi
+
+      - name: Verify environment
+        run: scripts/verify_env.sh --strict
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run incident evidence collection drill
+        run: |
+          mkdir -p artifacts
+          sudo AEGIS_BIN=./build/aegisbpf scripts/collect_incident_bundle.sh artifacts/incident-drill
+
+      - name: Upload incident bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-drill-bundle
+          path: artifacts/incident-drill.tar.gz

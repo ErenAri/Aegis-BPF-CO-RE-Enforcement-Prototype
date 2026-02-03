@@ -4,8 +4,22 @@
 #include <gtest/gtest.h>
 #include "utils.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <unistd.h>
+
 namespace aegis {
 namespace {
+
+std::filesystem::path make_temp_file_path()
+{
+    static uint64_t counter = 0;
+    return std::filesystem::temp_directory_path() /
+           ("aegisbpf_utils_test_" + std::to_string(getpid()) + "_" +
+            std::to_string(counter++) + "_" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+}
 
 TEST(TrimTest, EmptyString)
 {
@@ -284,6 +298,45 @@ TEST(ValidateExistingPathTest, SymlinkResolution)
         // Just verify it returns a canonicalized path
         EXPECT_TRUE(result->front() == '/');
     }
+}
+
+TEST(ValidateFilePermissionsTest, RegularFilePasses)
+{
+    auto file = make_temp_file_path();
+    {
+        std::ofstream out(file);
+        ASSERT_TRUE(out.is_open());
+        out << "data";
+    }
+
+    auto result = validate_file_permissions(file.string(), false);
+    EXPECT_TRUE(result);
+
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+}
+
+TEST(ValidateFilePermissionsTest, WorldWritableFileFails)
+{
+    auto file = make_temp_file_path();
+    {
+        std::ofstream out(file);
+        ASSERT_TRUE(out.is_open());
+        out << "data";
+    }
+
+    std::error_code ec;
+    std::filesystem::permissions(file, std::filesystem::perms::others_write,
+                                 std::filesystem::perm_options::add, ec);
+    ASSERT_FALSE(ec);
+
+    auto result = validate_file_permissions(file.string(), false);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error().code(), ErrorCode::PermissionDenied);
+
+    std::filesystem::permissions(file, std::filesystem::perms::others_write,
+                                 std::filesystem::perm_options::remove, ec);
+    std::filesystem::remove(file, ec);
 }
 
 }  // namespace

@@ -1,0 +1,27 @@
+name: Release Readiness
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  readiness:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+
+      - name: Run release-readiness gate
+        run: scripts/release_readiness.sh

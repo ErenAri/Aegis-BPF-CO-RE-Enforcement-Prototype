@@ -18,7 +18,11 @@
 #include <atomic>
 #include <csignal>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <sys/stat.h>
 #include <thread>
+#include <unistd.h>
 
 namespace aegis {
 
@@ -33,7 +37,12 @@ void handle_signal(int)
 
 void heartbeat_thread(BpfState* state, uint32_t ttl_seconds)
 {
-    while (g_heartbeat_running.load()) {
+    uint32_t sleep_interval = ttl_seconds / 2;
+    if (sleep_interval < 1) {
+        sleep_interval = 1;
+    }
+
+    while (g_heartbeat_running.load() && !g_exiting) {
         // Update deadman deadline
         struct timespec ts {};
         clock_gettime(CLOCK_BOOTTIME, &ts);
@@ -47,31 +56,46 @@ void heartbeat_thread(BpfState* state, uint32_t ttl_seconds)
                              .field("error", result.error().to_string()));
         }
 
-        // Sleep for half the TTL
-        std::this_thread::sleep_for(std::chrono::seconds(ttl_seconds / 2));
+        // Sleep for TTL/2, but check exit flags more frequently.
+        for (uint32_t i = 0; i < sleep_interval && g_heartbeat_running.load() && !g_exiting; ++i) {
+            sleep(1);
+        }
     }
 }
 
-// RAII wrapper for ring buffer
-class RingBufferGuard {
-  public:
-    explicit RingBufferGuard(ring_buffer* rb) : rb_(rb) {}
-    ~RingBufferGuard()
-    {
-        if (rb_) {
-            ring_buffer__free(rb_);
-        }
+Result<void> setup_agent_cgroup(BpfState& state)
+{
+    static constexpr const char* kAgentCgroup = "/sys/fs/cgroup/aegis_agent";
+
+    std::error_code ec;
+    std::filesystem::create_directories(kAgentCgroup, ec);
+    if (ec) {
+        return Error(ErrorCode::IoError, "Failed to create cgroup", ec.message());
     }
 
-    RingBufferGuard(const RingBufferGuard&) = delete;
-    RingBufferGuard& operator=(const RingBufferGuard&) = delete;
+    std::ofstream procs(std::string(kAgentCgroup) + "/cgroup.procs", std::ios::out | std::ios::trunc);
+    if (!procs.is_open()) {
+        return Error(ErrorCode::IoError, "Failed to open cgroup.procs", kAgentCgroup);
+    }
+    procs << getpid();
+    procs.close();
 
-    [[nodiscard]] ring_buffer* get() const { return rb_; }
-    [[nodiscard]] explicit operator bool() const { return rb_ != nullptr; }
+    struct stat st {};
+    if (stat(kAgentCgroup, &st) != 0) {
+        return Error::system(errno, "stat failed for " + std::string(kAgentCgroup));
+    }
 
-  private:
-    ring_buffer* rb_;
-};
+    uint64_t cgid = static_cast<uint64_t>(st.st_ino);
+
+    TRY(bump_memlock_rlimit());
+
+    uint8_t one = 1;
+    if (bpf_map_update_elem(bpf_map__fd(state.allow_cgroup), &cgid, &one, BPF_ANY)) {
+        return Error::system(errno, "Failed to update allow_cgroup_map");
+    }
+
+    return {};
+}
 
 }  // namespace
 

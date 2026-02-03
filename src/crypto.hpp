@@ -170,11 +170,25 @@ Result<void> verify_bundle(const SignedPolicyBundle& bundle,
 Result<std::vector<PublicKey>> load_trusted_keys();
 
 /**
+ * Resolve the trusted keys directory.
+ *
+ * Uses AEGIS_KEYS_DIR when set, otherwise /etc/aegisbpf/keys.
+ */
+std::string trusted_keys_dir();
+
+/**
  * Read the current policy version counter.
  *
  * @return Current version or 0 if not set
  */
 uint64_t read_version_counter();
+
+/**
+ * Resolve the policy version counter path.
+ *
+ * Uses AEGIS_VERSION_COUNTER_PATH when set, otherwise /var/lib/aegisbpf/version_counter.
+ */
+std::string version_counter_path();
 
 /**
  * Write the policy version counter.

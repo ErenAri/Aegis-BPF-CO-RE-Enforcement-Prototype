@@ -2,8 +2,11 @@
 // cppcheck-suppress-file missingInclude
 // cppcheck-suppress-file syntaxError
 #include <gtest/gtest.h>
-#include <fstream>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <vector>
+#include <unistd.h>
 #include "policy.hpp"
 #include "utils.hpp"
 
@@ -240,6 +243,141 @@ TEST_F(PolicyTest, NonexistentFile)
 
     EXPECT_FALSE(result);
     EXPECT_TRUE(issues.has_errors());
+}
+
+TEST_F(PolicyTest, ApplyRejectsConflictingHashOptions)
+{
+    auto result = policy_apply("/tmp/does-not-matter.policy",
+                               false,
+                               std::string(64, 'a'),
+                               "/tmp/policy.sha256",
+                               true);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error().code(), ErrorCode::InvalidArgument);
+}
+
+class ScopedEnvVar {
+  public:
+    ScopedEnvVar(const char* key, const std::string& value) : key_(key)
+    {
+        const char* existing = std::getenv(key_);
+        if (existing) {
+            had_previous_ = true;
+            previous_ = existing;
+        }
+        ::setenv(key_, value.c_str(), 1);
+    }
+
+    ~ScopedEnvVar()
+    {
+        if (had_previous_) {
+            ::setenv(key_, previous_.c_str(), 1);
+        }
+        else {
+            ::unsetenv(key_);
+        }
+    }
+
+  private:
+    const char* key_;
+    bool had_previous_ = false;
+    std::string previous_;
+};
+
+struct ApplyCall {
+    std::string path;
+    std::string hash;
+    bool reset = false;
+    bool record = false;
+};
+
+std::vector<ApplyCall> g_apply_calls;
+bool g_fail_first_apply_call = true;
+
+Result<void> fake_apply_policy_internal(const std::string& path,
+                                        const std::string& computed_hash,
+                                        bool reset,
+                                        bool record)
+{
+    g_apply_calls.push_back(ApplyCall{path, computed_hash, reset, record});
+    if (g_fail_first_apply_call && g_apply_calls.size() == 1) {
+        return Error(ErrorCode::PolicyApplyFailed, "Injected apply failure");
+    }
+    return {};
+}
+
+class PolicyRollbackTest : public ::testing::Test {
+  protected:
+    void SetUp() override
+    {
+        static uint64_t counter = 0;
+        test_dir_ = std::filesystem::temp_directory_path() /
+                    ("aegisbpf_policy_rollback_test_" + std::to_string(getpid()) + "_" +
+                     std::to_string(counter++));
+        std::filesystem::create_directories(test_dir_);
+        g_apply_calls.clear();
+        g_fail_first_apply_call = true;
+        set_apply_policy_internal_for_test(fake_apply_policy_internal);
+    }
+
+    void TearDown() override
+    {
+        reset_apply_policy_internal_for_test();
+        std::error_code ec;
+        std::filesystem::remove_all(test_dir_, ec);
+    }
+
+    std::string WritePolicy(const std::string& name, const std::string& content)
+    {
+        std::filesystem::path file = test_dir_ / name;
+        std::ofstream out(file);
+        out << content;
+        return file.string();
+    }
+
+    std::filesystem::path test_dir_;
+};
+
+TEST_F(PolicyRollbackTest, ApplyFailureTriggersRollbackWhenEnabled)
+{
+    std::string requested_policy = WritePolicy("requested.conf", "version=1\n");
+    std::string applied_policy = WritePolicy("applied.conf", "version=1\n");
+    ScopedEnvVar applied_env("AEGIS_POLICY_APPLIED_PATH", applied_policy);
+
+    auto result = policy_apply(requested_policy, false, "", "", true);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code(), ErrorCode::PolicyApplyFailed);
+    ASSERT_EQ(g_apply_calls.size(), 2u);
+    EXPECT_EQ(g_apply_calls[0].path, requested_policy);
+    EXPECT_EQ(g_apply_calls[1].path, applied_policy);
+    EXPECT_TRUE(g_apply_calls[1].reset);
+    EXPECT_FALSE(g_apply_calls[1].record);
+}
+
+TEST_F(PolicyRollbackTest, ApplyFailureSkipsRollbackWhenDisabled)
+{
+    std::string requested_policy = WritePolicy("requested.conf", "version=1\n");
+    std::string applied_policy = WritePolicy("applied.conf", "version=1\n");
+    ScopedEnvVar applied_env("AEGIS_POLICY_APPLIED_PATH", applied_policy);
+
+    auto result = policy_apply(requested_policy, false, "", "", false);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code(), ErrorCode::PolicyApplyFailed);
+    ASSERT_EQ(g_apply_calls.size(), 1u);
+    EXPECT_EQ(g_apply_calls[0].path, requested_policy);
+}
+
+TEST_F(PolicyRollbackTest, ApplyFailureSkipsRollbackWhenNoAppliedPolicyExists)
+{
+    std::string requested_policy = WritePolicy("requested.conf", "version=1\n");
+    std::string missing_applied_policy = (test_dir_ / "missing-applied.conf").string();
+    ScopedEnvVar applied_env("AEGIS_POLICY_APPLIED_PATH", missing_applied_policy);
+
+    auto result = policy_apply(requested_policy, false, "", "", true);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code(), ErrorCode::PolicyApplyFailed);
+    ASSERT_EQ(g_apply_calls.size(), 1u);
+    EXPECT_EQ(g_apply_calls[0].path, requested_policy);
 }
 
 }  // namespace

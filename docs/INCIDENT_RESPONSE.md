@@ -8,6 +8,7 @@ JSON either to stdout or journald.
 - Logs (journald): `journalctl -u aegisbpf -n 200 --no-pager`
 - Health check: `sudo aegisbpf health`
 - Block counters: `sudo aegisbpf stats` or `sudo aegisbpf metrics`
+- Network counters: inspect `aegisbpf_net_blocks_total` and `aegisbpf_net_ringbuf_drops_total` in metrics output
 
 ## Identify the offender
 Events include `pid`, `ppid`, `cgid`, `comm`, `path`, and `action`.
@@ -30,3 +31,9 @@ Events include `pid`, `ppid`, `cgid`, `comm`, `path`, and `action`.
 - `sudo aegisbpf metrics --out /var/lib/aegisbpf/metrics.prom`
 - `sudo aegisbpf stats > /var/lib/aegisbpf/stats.txt`
 - `sudo aegisbpf policy export /var/lib/aegisbpf/policy.export`
+
+Automated collection:
+- `sudo AEGIS_BIN=/usr/bin/aegisbpf scripts/collect_incident_bundle.sh /var/lib/aegisbpf/incident-<ticket>`
+
+This creates a compressed evidence bundle with health, metrics, policy, service
+status, and recent journald logs.

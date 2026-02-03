@@ -487,10 +487,8 @@ void print_net_block_event(const NetBlockEvent& ev) {
 // New metrics
 aegisbpf_net_blocks_total{type="connect"}
 aegisbpf_net_blocks_total{type="bind"}
-aegisbpf_net_blocks_total{type="listen"}
-aegisbpf_net_blocks_by_ip{ip="192.168.1.100"}
-aegisbpf_net_blocks_by_port{port="22"}
-aegisbpf_net_blocks_by_cidr{cidr="10.0.0.0/8"}
+aegisbpf_net_blocks_by_ip_total{ip="192.168.1.100"}
+aegisbpf_net_blocks_by_port_total{port="22"}
 aegisbpf_net_ringbuf_drops_total
 aegisbpf_net_rules_total{type="ip"}
 aegisbpf_net_rules_total{type="cidr"}

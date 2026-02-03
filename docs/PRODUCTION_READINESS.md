@@ -45,9 +45,19 @@ deliver each requirement.
 - Environment verification: `scripts/verify_env.sh [--strict]`
 - Event schema validation: `scripts/validate_event_schema.py` + `tests/event_samples/`
 - SBOM generation: `sbom` job in `.github/workflows/ci.yml`
+- Release provenance attestations: `actions/attest-build-provenance` in `.github/workflows/release.yml`
+- Reproducibility gate: `scripts/check_reproducible_build.sh` + `.github/workflows/reproducibility.yml`
+- Release-readiness quality gate: `scripts/release_readiness.sh` + `.github/workflows/release-readiness.yml`
+- Security automation: `.github/workflows/security.yml` (CodeQL, dependency review, gitleaks)
+- Dependency update automation: `.github/dependabot.yml` (GitHub Actions + Docker)
 - E2E workflow: `.github/workflows/e2e.yml`
+- Soak reliability workflow: `.github/workflows/soak.yml` + `scripts/soak_reliability.sh`
 - Perf regression workflow: `.github/workflows/perf.yml`
 - Kernel matrix workflow: `.github/workflows/kernel-matrix.yml`
 - Nightly fuzz workflow: `.github/workflows/nightly-fuzz.yml`
 - Upgrade/migration runbook: `docs/UPGRADE.md`
+- Key rotation/revocation runbook: `docs/KEY_MANAGEMENT.md`
+- Incident evidence collection script: `scripts/collect_incident_bundle.sh`
+- Incident drill workflow: `.github/workflows/incident-drill.yml`
 - Incident response runbook: `docs/INCIDENT_RESPONSE.md`
+- Support and deprecation policy: `docs/SUPPORT_POLICY.md`

@@ -49,6 +49,16 @@ groups:
           summary: "AegisBPF ring buffer is dropping events"
           description: "AegisBPF on {{ $labels.instance }} is losing events due to ring buffer overflow. Drop rate: {{ $value | printf \"%.2f\" }}/s. Consider increasing buffer size or reducing event volume."
 
+      # SLO violation: event loss ratio > 0.1%
+      - alert: AegisBPFEventLossSLOViolation
+        expr: rate(aegisbpf_ringbuf_drops_total[5m]) / (rate(aegisbpf_blocks_total[5m]) + rate(aegisbpf_ringbuf_drops_total[5m]) + 1) > 0.001
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AegisBPF event loss SLO violated"
+          description: "AegisBPF on {{ $labels.instance }} exceeds the 0.1% event loss SLO for 15m."
+
       # High ring buffer drop rate
       - alert: AegisBPFHighRingbufDrops
         expr: rate(aegisbpf_ringbuf_drops_total[1m]) > 100
@@ -98,6 +108,36 @@ groups:
         annotations:
           summary: "Path {{ $labels.path }} blocked repeatedly"
           description: "Path {{ $labels.path }} has been blocked {{ $value | printf \"%.0f\" }} times in the last hour on {{ $labels.instance }}."
+
+      # Network block spikes (connect/bind)
+      - alert: AegisBPFNetworkBlockRate
+        expr: sum by (instance, type) (rate(aegisbpf_net_blocks_total[5m])) > 25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High network block rate ({{ $labels.type }})"
+          description: "AegisBPF on {{ $labels.instance }} is blocking >25 network operations/sec for type={{ $labels.type }}."
+
+      # Network event drops
+      - alert: AegisBPFNetworkRingbufDrops
+        expr: rate(aegisbpf_net_ringbuf_drops_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AegisBPF network ring buffer is dropping events"
+          description: "AegisBPF on {{ $labels.instance }} is dropping network events. Drop rate: {{ $value | printf \"%.2f\" }}/s."
+
+      # SLO violation: network event loss ratio > 0.1%
+      - alert: AegisBPFNetworkEventLossSLOViolation
+        expr: rate(aegisbpf_net_ringbuf_drops_total[5m]) / (sum by (instance) (rate(aegisbpf_net_blocks_total[5m])) + rate(aegisbpf_net_ringbuf_drops_total[5m]) + 1) > 0.001
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AegisBPF network event loss SLO violated"
+          description: "AegisBPF on {{ $labels.instance }} exceeds the 0.1% network event loss SLO for 15m."
 
       # Agent metrics stale - scrape working but counters not updating
       - alert: AegisBPFMetricsStale

@@ -1,7 +1,7 @@
 # AegisBPF Kernel Compatibility Matrix
 
 This document describes the kernel requirements and compatibility matrix for AegisBPF.
-See `docs/UPGRADE.md` for versioning and support policy.
+See `docs/SUPPORT_POLICY.md` for versioning and support windows.
 
 ## Requirements
 

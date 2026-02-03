@@ -59,3 +59,4 @@ Security goals:
 - Systemd unit and env file for managed deployments.
 - CI build on supported kernels with pinned dependency versions.
 - Smoke tests for both enforce and audit fallback paths.
+- Published support/deprecation policy in `docs/SUPPORT_POLICY.md`.

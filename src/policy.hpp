@@ -9,6 +9,10 @@
 namespace aegis {
 
 class BpfState;
+using ApplyPolicyInternalFn = Result<void> (*)(const std::string& path,
+                                               const std::string& computed_hash,
+                                               bool reset,
+                                               bool record);
 
 // Policy parsing
 Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues);
@@ -28,5 +32,9 @@ Result<void> reset_policy_maps(BpfState& state);
 Result<void> record_applied_policy(const std::string& path, const std::string& hash);
 Result<void> write_policy_file(const std::string& path, std::vector<std::string> deny_paths,
                                std::vector<std::string> deny_inodes, std::vector<std::string> allow_cgroups);
+
+// Test hooks
+void set_apply_policy_internal_for_test(ApplyPolicyInternalFn fn);
+void reset_apply_policy_internal_for_test();
 
 }  // namespace aegis

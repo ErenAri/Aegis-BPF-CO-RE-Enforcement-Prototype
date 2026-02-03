@@ -1,0 +1,32 @@
+name: Soak Reliability
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * 0"
+
+jobs:
+  soak:
+    runs-on: [self-hosted, bpf-lsm]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (if apt-get is available)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+          fi
+
+      - name: Verify environment
+        run: scripts/verify_env.sh --strict
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Soak reliability gate
+        run: sudo AEGIS_BIN=./build/aegisbpf DURATION_SECONDS=900 MAX_RINGBUF_DROPS=250 MAX_RSS_GROWTH_KB=131072 scripts/soak_reliability.sh
