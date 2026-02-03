@@ -18,6 +18,7 @@ bool set_event_log_sink(const std::string& value);
 int handle_event(void* ctx, void* data, size_t size);
 void print_exec_event(const ExecEvent& ev);
 void print_block_event(const BlockEvent& ev);
+void print_net_block_event(const NetBlockEvent& ev);
 
 // Journald integration (only available when HAVE_SYSTEMD is defined)
 #ifdef HAVE_SYSTEMD

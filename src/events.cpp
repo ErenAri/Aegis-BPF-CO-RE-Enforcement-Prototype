@@ -3,6 +3,7 @@
 #include "logging.hpp"
 #include "utils.hpp"
 
+#include <arpa/inet.h>
 #include <atomic>
 #include <cstring>
 #include <sstream>
@@ -186,6 +187,84 @@ void print_block_event(const BlockEvent& ev)
 #endif
 }
 
+static std::string format_ipv4_addr(uint32_t ip_be)
+{
+    char buf[INET_ADDRSTRLEN];
+    struct in_addr addr {};
+    addr.s_addr = ip_be;
+    if (inet_ntop(AF_INET, &addr, buf, sizeof(buf)) == nullptr) {
+        return "?.?.?.?";
+    }
+    return std::string(buf);
+}
+
+static std::string protocol_to_string(uint8_t protocol)
+{
+    switch (protocol) {
+    case 6:
+        return "tcp";
+    case 17:
+        return "udp";
+    default:
+        return std::to_string(protocol);
+    }
+}
+
+void print_net_block_event(const NetBlockEvent& ev)
+{
+    std::ostringstream oss;
+    std::string cgpath = resolve_cgroup_path(ev.cgid);
+    std::string action = to_string(ev.action, sizeof(ev.action));
+    std::string rule_type = to_string(ev.rule_type, sizeof(ev.rule_type));
+    std::string comm = to_string(ev.comm, sizeof(ev.comm));
+    std::string exec_id = build_exec_id(ev.pid, ev.start_time);
+    std::string parent_exec_id = build_exec_id(ev.ppid, ev.parent_start_time);
+
+    std::string event_type = (ev.direction == 0) ? "net_connect_block" : "net_bind_block";
+    std::string direction = (ev.direction == 0) ? "egress" : "bind";
+
+    oss << "{\"type\":\"" << event_type << "\""
+        << ",\"pid\":" << ev.pid
+        << ",\"ppid\":" << ev.ppid
+        << ",\"start_time\":" << ev.start_time;
+    if (!exec_id.empty()) {
+        oss << ",\"exec_id\":\"" << json_escape(exec_id) << "\"";
+    }
+    oss << ",\"parent_start_time\":" << ev.parent_start_time;
+    if (!parent_exec_id.empty()) {
+        oss << ",\"parent_exec_id\":\"" << json_escape(parent_exec_id) << "\"";
+    }
+    oss << ",\"cgid\":" << ev.cgid
+        << ",\"cgroup_path\":\"" << json_escape(cgpath) << "\"";
+
+    // Network-specific fields
+    oss << ",\"family\":\"" << (ev.family == 2 ? "ipv4" : "ipv6") << "\"";
+    oss << ",\"protocol\":\"" << protocol_to_string(ev.protocol) << "\"";
+    oss << ",\"direction\":\"" << direction << "\"";
+
+    if (ev.direction == 0) {
+        // Egress (connect) - show remote address
+        if (ev.family == 2) {
+            oss << ",\"remote_ip\":\"" << format_ipv4_addr(ev.remote_ipv4) << "\"";
+        }
+        oss << ",\"remote_port\":" << ev.remote_port;
+    }
+    else {
+        // Bind - show local port
+        oss << ",\"local_port\":" << ev.local_port;
+    }
+
+    oss << ",\"rule_type\":\"" << json_escape(rule_type) << "\""
+        << ",\"action\":\"" << json_escape(action) << "\""
+        << ",\"comm\":\"" << json_escape(comm) << "\"}";
+
+    std::string payload = oss.str();
+    if (sink_wants_stdout(g_event_sink)) {
+        std::cout << payload << std::endl;
+    }
+    // TODO: Add journald support for network events
+}
+
 // cppcheck-suppress constParameterPointer
 int handle_event(void*, void* data, size_t)
 {
@@ -195,6 +274,9 @@ int handle_event(void*, void* data, size_t)
     }
     else if (e->type == EVENT_BLOCK) {
         print_block_event(e->block);
+    }
+    else if (e->type == EVENT_NET_CONNECT_BLOCK || e->type == EVENT_NET_BIND_BLOCK) {
+        print_net_block_event(e->net_block);
     }
     return 0;
 }

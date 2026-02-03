@@ -21,6 +21,14 @@ inline constexpr const char* kAgentMetaPin = "/sys/fs/bpf/aegisbpf/agent_meta";
 inline constexpr const char* kSurvivalAllowlistPin = "/sys/fs/bpf/aegisbpf/survival_allowlist";
 inline constexpr const char* kBpfObjInstallPath = "/usr/lib/aegisbpf/aegis.bpf.o";
 
+// Network map pin paths
+inline constexpr const char* kDenyIpv4Pin = "/sys/fs/bpf/aegisbpf/deny_ipv4";
+inline constexpr const char* kDenyPortPin = "/sys/fs/bpf/aegisbpf/deny_port";
+inline constexpr const char* kDenyCidrV4Pin = "/sys/fs/bpf/aegisbpf/deny_cidr_v4";
+inline constexpr const char* kNetBlockStatsPin = "/sys/fs/bpf/aegisbpf/net_block_stats";
+inline constexpr const char* kNetIpStatsPin = "/sys/fs/bpf/aegisbpf/net_ip_stats";
+inline constexpr const char* kNetPortStatsPin = "/sys/fs/bpf/aegisbpf/net_port_stats";
+
 // Break-glass detection paths
 inline constexpr const char* kBreakGlassPath = "/etc/aegisbpf/break_glass";
 inline constexpr const char* kBreakGlassVarPath = "/var/lib/aegisbpf/break_glass";
@@ -36,7 +44,9 @@ inline constexpr size_t kDenyPathMax = 256;
 
 enum EventType : uint32_t {
     EVENT_EXEC = 1,
-    EVENT_BLOCK = 2
+    EVENT_BLOCK = 2,
+    EVENT_NET_CONNECT_BLOCK = 10,
+    EVENT_NET_BIND_BLOCK = 11,
 };
 
 enum class EventLogSink {
@@ -66,17 +76,68 @@ struct BlockEvent {
     char action[8];
 };
 
+struct NetBlockEvent {
+    uint32_t pid;
+    uint32_t ppid;
+    uint64_t start_time;
+    uint64_t parent_start_time;
+    uint64_t cgid;
+    char comm[16];
+    uint8_t family;        /* AF_INET=2 or AF_INET6=10 */
+    uint8_t protocol;      /* IPPROTO_TCP=6, IPPROTO_UDP=17 */
+    uint16_t local_port;
+    uint16_t remote_port;
+    uint8_t direction;     /* 0=egress (connect), 1=bind */
+    uint8_t _pad;
+    uint32_t remote_ipv4;  /* Network byte order */
+    uint8_t remote_ipv6[16];
+    char action[8];        /* "AUDIT" or "KILL" */
+    char rule_type[16];    /* "ip", "port", "cidr" */
+};
+
 struct Event {
     uint32_t type;
     union {
         ExecEvent exec;
         BlockEvent block;
+        NetBlockEvent net_block;
     };
 };
 
 struct BlockStats {
     uint64_t blocks;
     uint64_t ringbuf_drops;
+};
+
+struct NetBlockStats {
+    uint64_t connect_blocks;
+    uint64_t bind_blocks;
+    uint64_t ringbuf_drops;
+};
+
+struct PortKey {
+    uint16_t port;
+    uint8_t protocol;   /* 0=any, 6=tcp, 17=udp */
+    uint8_t direction;  /* 0=egress, 1=bind, 2=both */
+
+    bool operator==(const PortKey& other) const noexcept
+    {
+        return port == other.port && protocol == other.protocol && direction == other.direction;
+    }
+};
+
+struct PortKeyHash {
+    std::size_t operator()(const PortKey& k) const noexcept
+    {
+        return std::hash<uint16_t>{}(k.port) ^
+               (std::hash<uint8_t>{}(k.protocol) << 1) ^
+               (std::hash<uint8_t>{}(k.direction) << 2);
+    }
+};
+
+struct Ipv4LpmKey {
+    uint32_t prefixlen;
+    uint32_t addr;  /* Network byte order */
 };
 
 struct InodeId {
@@ -138,12 +199,33 @@ struct AgentMeta {
     uint32_t layout_version;
 };
 
+struct PortRule {
+    uint16_t port;
+    uint8_t protocol;   /* 0=any, 6=tcp, 17=udp */
+    uint8_t direction;  /* 0=egress, 1=bind, 2=both */
+};
+
+struct IpPortRule {
+    std::string ip;
+    uint16_t port;
+    uint8_t protocol;
+};
+
+struct NetworkPolicy {
+    std::vector<std::string> deny_ips;       /* Exact IPv4/IPv6 addresses */
+    std::vector<std::string> deny_cidrs;     /* CIDR ranges */
+    std::vector<PortRule> deny_ports;        /* Port rules */
+    std::vector<IpPortRule> deny_ip_ports;   /* IP:port combos */
+    bool enabled = false;
+};
+
 struct Policy {
     int version = 0;
     std::vector<std::string> deny_paths;
     std::vector<InodeId> deny_inodes;
     std::vector<std::string> allow_cgroup_paths;
     std::vector<uint64_t> allow_cgroup_ids;
+    NetworkPolicy network;
 };
 
 struct PolicyIssues {

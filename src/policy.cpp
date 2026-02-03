@@ -2,6 +2,7 @@
 #include "policy.hpp"
 #include "bpf_ops.hpp"
 #include "logging.hpp"
+#include "network_ops.hpp"
 #include "sha256.hpp"
 #include "utils.hpp"
 
@@ -25,6 +26,61 @@ void report_policy_issues(const PolicyIssues& issues)
     }
 }
 
+// Helper to parse port rule: port[:protocol[:direction]]
+static bool parse_port_rule(const std::string& str, PortRule& rule)
+{
+    rule = {};
+    rule.direction = 2;  // both
+
+    std::vector<std::string> parts;
+    std::string current;
+    for (char c : str) {
+        if (c == ':') {
+            parts.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    parts.push_back(current);
+
+    if (parts.empty() || parts[0].empty()) {
+        return false;
+    }
+
+    uint64_t port = 0;
+    if (!parse_uint64(parts[0], port) || port == 0 || port > 65535) {
+        return false;
+    }
+    rule.port = static_cast<uint16_t>(port);
+
+    if (parts.size() > 1 && !parts[1].empty()) {
+        if (parts[1] == "tcp") {
+            rule.protocol = 6;
+        } else if (parts[1] == "udp") {
+            rule.protocol = 17;
+        } else if (parts[1] == "any") {
+            rule.protocol = 0;
+        } else {
+            return false;
+        }
+    }
+
+    if (parts.size() > 2 && !parts[2].empty()) {
+        if (parts[2] == "egress" || parts[2] == "connect") {
+            rule.direction = 0;
+        } else if (parts[2] == "bind") {
+            rule.direction = 1;
+        } else if (parts[2] == "both") {
+            rule.direction = 2;
+        } else {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues)
 {
     std::ifstream in(path);
@@ -39,8 +95,17 @@ Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues)
     std::unordered_set<std::string> deny_inode_seen;
     std::unordered_set<std::string> allow_path_seen;
     std::unordered_set<uint64_t> allow_id_seen;
+    std::unordered_set<std::string> deny_ip_seen;
+    std::unordered_set<std::string> deny_cidr_seen;
+    std::unordered_set<std::string> deny_port_seen;
     std::string line;
     size_t line_no = 0;
+
+    // Valid sections
+    static const std::unordered_set<std::string> valid_sections = {
+        "deny_path", "deny_inode", "allow_cgroup",
+        "deny_ip", "deny_cidr", "deny_port"
+    };
 
     while (std::getline(in, line)) {
         ++line_no;
@@ -51,7 +116,7 @@ Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues)
 
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             section = trim(trimmed.substr(1, trimmed.size() - 2));
-            if (section != "deny_path" && section != "deny_inode" && section != "allow_cgroup") {
+            if (valid_sections.find(section) == valid_sections.end()) {
                 issues.errors.push_back("line " + std::to_string(line_no) + ": unknown section '" + section + "'");
                 section.clear();
             }
@@ -128,12 +193,57 @@ Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues)
             }
             continue;
         }
+
+        // Network sections
+        if (section == "deny_ip") {
+            // Validate IP format
+            uint32_t ip_be;
+            if (!parse_ipv4(trimmed, ip_be)) {
+                issues.errors.push_back("line " + std::to_string(line_no) + ": invalid IPv4 address '" + trimmed + "'");
+                continue;
+            }
+            if (deny_ip_seen.insert(trimmed).second) {
+                policy.network.deny_ips.push_back(trimmed);
+                policy.network.enabled = true;
+            }
+            continue;
+        }
+
+        if (section == "deny_cidr") {
+            // Validate CIDR format
+            uint32_t ip_be;
+            uint8_t prefix_len;
+            if (!parse_cidr_v4(trimmed, ip_be, prefix_len)) {
+                issues.errors.push_back("line " + std::to_string(line_no) + ": invalid CIDR notation '" + trimmed + "'");
+                continue;
+            }
+            if (deny_cidr_seen.insert(trimmed).second) {
+                policy.network.deny_cidrs.push_back(trimmed);
+                policy.network.enabled = true;
+            }
+            continue;
+        }
+
+        if (section == "deny_port") {
+            // Format: port[:protocol[:direction]]
+            PortRule rule{};
+            if (!parse_port_rule(trimmed, rule)) {
+                issues.errors.push_back("line " + std::to_string(line_no) + ": invalid port rule '" + trimmed + "'");
+                continue;
+            }
+            if (deny_port_seen.insert(trimmed).second) {
+                policy.network.deny_ports.push_back(rule);
+                policy.network.enabled = true;
+            }
+            continue;
+        }
     }
 
     if (policy.version == 0) {
         issues.errors.push_back("missing header key: version");
     }
-    if (policy.version != 1) {
+    // Accept version 1 or 2 (2 adds network support)
+    if (policy.version != 1 && policy.version != 2) {
         issues.errors.push_back("unsupported policy version: " + std::to_string(policy.version));
     }
 

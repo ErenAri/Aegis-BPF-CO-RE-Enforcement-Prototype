@@ -129,6 +129,7 @@ set(AEGIS_SOURCES
     src/crypto.cpp
     src/events.cpp
     src/kernel_features.cpp
+    src/network_ops.cpp
     src/policy.cpp
     src/seccomp.cpp
     src/sha256.cpp
@@ -142,6 +143,7 @@ set(AEGIS_HEADERS
     src/events.hpp
     src/kernel_features.hpp
     src/logging.hpp
+    src/network_ops.hpp
     src/policy.hpp
     src/result.hpp
     src/seccomp.hpp
@@ -183,6 +185,7 @@ set(AEGIS_LIB_SOURCES
     src/crypto.cpp
     src/events.cpp
     src/kernel_features.cpp
+    src/network_ops.cpp
     src/policy.cpp
     src/seccomp.cpp
     src/sha256.cpp

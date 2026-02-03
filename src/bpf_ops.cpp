@@ -187,6 +187,14 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
     state.config_map = bpf_object__find_map_by_name(state.obj, "agent_config_map");
     state.survival_allowlist = bpf_object__find_map_by_name(state.obj, "survival_allowlist");
 
+    // Network maps (optional)
+    state.deny_ipv4 = bpf_object__find_map_by_name(state.obj, "deny_ipv4");
+    state.deny_port = bpf_object__find_map_by_name(state.obj, "deny_port");
+    state.deny_cidr_v4 = bpf_object__find_map_by_name(state.obj, "deny_cidr_v4");
+    state.net_block_stats = bpf_object__find_map_by_name(state.obj, "net_block_stats");
+    state.net_ip_stats = bpf_object__find_map_by_name(state.obj, "net_ip_stats");
+    state.net_port_stats = bpf_object__find_map_by_name(state.obj, "net_port_stats");
+
     if (!state.events || !state.deny_inode || !state.deny_path || !state.allow_cgroup ||
         !state.block_stats || !state.deny_cgroup_stats || !state.deny_inode_stats ||
         !state.deny_path_stats || !state.agent_meta || !state.config_map ||
@@ -223,6 +231,26 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
         TRY(try_reuse(state.deny_path_stats, kDenyPathStatsPin, state.deny_path_stats_reused));
         TRY(try_reuse(state.agent_meta, kAgentMetaPin, state.agent_meta_reused));
         TRY(try_reuse(state.survival_allowlist, kSurvivalAllowlistPin, state.survival_allowlist_reused));
+
+        // Network maps (optional - don't fail if not found)
+        if (state.deny_ipv4) {
+            TRY(try_reuse(state.deny_ipv4, kDenyIpv4Pin, state.deny_ipv4_reused));
+        }
+        if (state.deny_port) {
+            TRY(try_reuse(state.deny_port, kDenyPortPin, state.deny_port_reused));
+        }
+        if (state.deny_cidr_v4) {
+            TRY(try_reuse(state.deny_cidr_v4, kDenyCidrV4Pin, state.deny_cidr_v4_reused));
+        }
+        if (state.net_block_stats) {
+            TRY(try_reuse(state.net_block_stats, kNetBlockStatsPin, state.net_block_stats_reused));
+        }
+        if (state.net_ip_stats) {
+            TRY(try_reuse(state.net_ip_stats, kNetIpStatsPin, state.net_ip_stats_reused));
+        }
+        if (state.net_port_stats) {
+            TRY(try_reuse(state.net_port_stats, kNetPortStatsPin, state.net_port_stats_reused));
+        }
     }
 
     if (!kernel_bpf_lsm_enabled()) {
@@ -231,6 +259,15 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
             bpf_program__set_autoload(lsm_prog, false);
         }
         lsm_prog = bpf_object__find_program_by_name(state.obj, "handle_inode_permission");
+        if (lsm_prog) {
+            bpf_program__set_autoload(lsm_prog, false);
+        }
+        // Disable network LSM hooks when LSM is not available
+        lsm_prog = bpf_object__find_program_by_name(state.obj, "handle_socket_connect");
+        if (lsm_prog) {
+            bpf_program__set_autoload(lsm_prog, false);
+        }
+        lsm_prog = bpf_object__find_program_by_name(state.obj, "handle_socket_bind");
         if (lsm_prog) {
             bpf_program__set_autoload(lsm_prog, false);
         }
@@ -245,7 +282,13 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
     bool need_pins = !state.inode_reused || !state.deny_path_reused || !state.cgroup_reused ||
                      !state.block_stats_reused || !state.deny_cgroup_stats_reused ||
                      !state.deny_inode_stats_reused || !state.deny_path_stats_reused ||
-                     !state.agent_meta_reused || !state.survival_allowlist_reused;
+                     !state.agent_meta_reused || !state.survival_allowlist_reused ||
+                     (state.deny_ipv4 && !state.deny_ipv4_reused) ||
+                     (state.deny_port && !state.deny_port_reused) ||
+                     (state.deny_cidr_v4 && !state.deny_cidr_v4_reused) ||
+                     (state.net_block_stats && !state.net_block_stats_reused) ||
+                     (state.net_ip_stats && !state.net_ip_stats_reused) ||
+                     (state.net_port_stats && !state.net_port_stats_reused);
 
     if (need_pins) {
         auto pin_result = ensure_pin_dir();
@@ -274,6 +317,26 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
         TRY(try_pin(state.deny_path_stats, kDenyPathStatsPin, state.deny_path_stats_reused));
         TRY(try_pin(state.agent_meta, kAgentMetaPin, state.agent_meta_reused));
         TRY(try_pin(state.survival_allowlist, kSurvivalAllowlistPin, state.survival_allowlist_reused));
+
+        // Network maps (optional)
+        if (state.deny_ipv4) {
+            TRY(try_pin(state.deny_ipv4, kDenyIpv4Pin, state.deny_ipv4_reused));
+        }
+        if (state.deny_port) {
+            TRY(try_pin(state.deny_port, kDenyPortPin, state.deny_port_reused));
+        }
+        if (state.deny_cidr_v4) {
+            TRY(try_pin(state.deny_cidr_v4, kDenyCidrV4Pin, state.deny_cidr_v4_reused));
+        }
+        if (state.net_block_stats) {
+            TRY(try_pin(state.net_block_stats, kNetBlockStatsPin, state.net_block_stats_reused));
+        }
+        if (state.net_ip_stats) {
+            TRY(try_pin(state.net_ip_stats, kNetIpStatsPin, state.net_ip_stats_reused));
+        }
+        if (state.net_port_stats) {
+            TRY(try_pin(state.net_port_stats, kNetPortStatsPin, state.net_port_stats_reused));
+        }
     }
 
     if (attach_links) {

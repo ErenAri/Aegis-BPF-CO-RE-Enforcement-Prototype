@@ -10,6 +10,7 @@
 #include "events.hpp"
 #include "kernel_features.hpp"
 #include "logging.hpp"
+#include "network_ops.hpp"
 #include "policy.hpp"
 #include "seccomp.hpp"
 #include "sha256.hpp"
@@ -562,6 +563,359 @@ static int allow_list()
 
     for (uint64_t id : *ids_result) {
         std::cout << id << std::endl;
+    }
+
+    return 0;
+}
+
+// ============================================================================
+// Network Commands
+// ============================================================================
+
+static int network_deny_add_ip(const std::string& ip)
+{
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto add_result = add_deny_ipv4(state, ip);
+    if (!add_result) {
+        logger().log(SLOG_ERROR("Failed to add deny IP")
+                         .field("error", add_result.error().to_string()));
+        return 1;
+    }
+
+    std::cout << "Added deny IP: " << ip << std::endl;
+    return 0;
+}
+
+static int network_deny_add_cidr(const std::string& cidr)
+{
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto add_result = add_deny_cidr_v4(state, cidr);
+    if (!add_result) {
+        logger().log(SLOG_ERROR("Failed to add deny CIDR")
+                         .field("error", add_result.error().to_string()));
+        return 1;
+    }
+
+    std::cout << "Added deny CIDR: " << cidr << std::endl;
+    return 0;
+}
+
+static int network_deny_add_port(uint16_t port, const std::string& protocol_str, const std::string& direction_str)
+{
+    uint8_t protocol = 0;  // any
+    if (protocol_str == "tcp") {
+        protocol = 6;
+    } else if (protocol_str == "udp") {
+        protocol = 17;
+    } else if (!protocol_str.empty() && protocol_str != "any") {
+        logger().log(SLOG_ERROR("Invalid protocol").field("protocol", protocol_str));
+        return 1;
+    }
+
+    uint8_t direction = 2;  // both
+    if (direction_str == "egress" || direction_str == "connect") {
+        direction = 0;
+    } else if (direction_str == "bind") {
+        direction = 1;
+    } else if (!direction_str.empty() && direction_str != "both") {
+        logger().log(SLOG_ERROR("Invalid direction").field("direction", direction_str));
+        return 1;
+    }
+
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto add_result = add_deny_port(state, port, protocol, direction);
+    if (!add_result) {
+        logger().log(SLOG_ERROR("Failed to add deny port")
+                         .field("error", add_result.error().to_string()));
+        return 1;
+    }
+
+    std::cout << "Added deny port: " << port
+              << " protocol=" << protocol_name(protocol)
+              << " direction=" << direction_name(direction) << std::endl;
+    return 0;
+}
+
+static int network_deny_del_ip(const std::string& ip)
+{
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto del_result = del_deny_ipv4(state, ip);
+    if (!del_result) {
+        logger().log(SLOG_ERROR("Failed to delete deny IP")
+                         .field("error", del_result.error().to_string()));
+        return 1;
+    }
+
+    std::cout << "Deleted deny IP: " << ip << std::endl;
+    return 0;
+}
+
+static int network_deny_del_cidr(const std::string& cidr)
+{
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto del_result = del_deny_cidr_v4(state, cidr);
+    if (!del_result) {
+        logger().log(SLOG_ERROR("Failed to delete deny CIDR")
+                         .field("error", del_result.error().to_string()));
+        return 1;
+    }
+
+    std::cout << "Deleted deny CIDR: " << cidr << std::endl;
+    return 0;
+}
+
+static int network_deny_del_port(uint16_t port, const std::string& protocol_str, const std::string& direction_str)
+{
+    uint8_t protocol = 0;
+    if (protocol_str == "tcp") {
+        protocol = 6;
+    } else if (protocol_str == "udp") {
+        protocol = 17;
+    }
+
+    uint8_t direction = 2;
+    if (direction_str == "egress" || direction_str == "connect") {
+        direction = 0;
+    } else if (direction_str == "bind") {
+        direction = 1;
+    }
+
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto del_result = del_deny_port(state, port, protocol, direction);
+    if (!del_result) {
+        logger().log(SLOG_ERROR("Failed to delete deny port")
+                         .field("error", del_result.error().to_string()));
+        return 1;
+    }
+
+    std::cout << "Deleted deny port: " << port << std::endl;
+    return 0;
+}
+
+static int network_deny_list()
+{
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    // List IPv4 addresses
+    auto ips_result = list_deny_ipv4(state);
+    if (ips_result) {
+        auto ips = *ips_result;
+        if (!ips.empty()) {
+            std::cout << "Denied IPv4 addresses (" << ips.size() << "):" << std::endl;
+            for (uint32_t ip : ips) {
+                std::cout << "  " << format_ipv4(ip) << std::endl;
+            }
+        }
+    }
+
+    // List CIDRs
+    auto cidrs_result = list_deny_cidr_v4(state);
+    if (cidrs_result) {
+        auto cidrs = *cidrs_result;
+        if (!cidrs.empty()) {
+            std::cout << "Denied CIDRs (" << cidrs.size() << "):" << std::endl;
+            for (const auto& cidr : cidrs) {
+                std::cout << "  " << format_cidr_v4(cidr.first, cidr.second) << std::endl;
+            }
+        }
+    }
+
+    // List ports
+    auto ports_result = list_deny_ports(state);
+    if (ports_result) {
+        auto ports = *ports_result;
+        if (!ports.empty()) {
+            std::cout << "Denied ports (" << ports.size() << "):" << std::endl;
+            for (const auto& pk : ports) {
+                std::cout << "  " << pk.port
+                          << " protocol=" << protocol_name(pk.protocol)
+                          << " direction=" << direction_name(pk.direction) << std::endl;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int network_deny_clear()
+{
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto clear_result = clear_network_maps(state);
+    if (!clear_result) {
+        logger().log(SLOG_ERROR("Failed to clear network maps")
+                         .field("error", clear_result.error().to_string()));
+        return 1;
+    }
+
+    std::cout << "Cleared all network deny rules" << std::endl;
+    return 0;
+}
+
+static int network_stats()
+{
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
+        return 1;
+    }
+
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
+    }
+
+    auto stats_result = read_net_block_stats(state);
+    if (!stats_result) {
+        logger().log(SLOG_ERROR("Failed to read network block stats")
+                         .field("error", stats_result.error().to_string()));
+        return 1;
+    }
+    NetBlockStats stats = *stats_result;
+
+    // Count entries
+    auto ips = list_deny_ipv4(state);
+    auto cidrs = list_deny_cidr_v4(state);
+    auto ports = list_deny_ports(state);
+
+    std::cout << "Network Statistics:" << std::endl;
+    std::cout << "  deny_ipv4 entries: " << (ips ? ips->size() : 0) << std::endl;
+    std::cout << "  deny_cidr entries: " << (cidrs ? cidrs->size() : 0) << std::endl;
+    std::cout << "  deny_port entries: " << (ports ? ports->size() : 0) << std::endl;
+    std::cout << "  connect_blocks: " << stats.connect_blocks << std::endl;
+    std::cout << "  bind_blocks: " << stats.bind_blocks << std::endl;
+    std::cout << "  ringbuf_drops: " << stats.ringbuf_drops << std::endl;
+
+    // Per-IP stats
+    auto ip_stats_result = read_net_ip_stats(state);
+    if (ip_stats_result && !ip_stats_result->empty()) {
+        std::cout << "Blocks by IP:" << std::endl;
+        for (const auto& kv : *ip_stats_result) {
+            std::cout << "  " << format_ipv4(kv.first) << ": " << kv.second << std::endl;
+        }
+    }
+
+    // Per-port stats
+    auto port_stats_result = read_net_port_stats(state);
+    if (port_stats_result && !port_stats_result->empty()) {
+        std::cout << "Blocks by port:" << std::endl;
+        for (const auto& kv : *port_stats_result) {
+            std::cout << "  " << kv.first << ": " << kv.second << std::endl;
+        }
     }
 
     return 0;
@@ -1218,6 +1572,9 @@ static int usage(const char* prog)
               << " run [--audit|--enforce] [--seccomp] [--deadman-ttl=<seconds>] [--lsm-hook=file|inode|both] [--ringbuf-bytes=<bytes>] [--event-sample-rate=<n>] [--log=stdout|journald|both] [--log-level=debug|info|warn|error] [--log-format=text|json]"
               << " | block {add|del|list|clear} [path]"
               << " | allow {add|del} <cgroup_path> | allow list"
+              << " | network deny {add|del} --ip <addr> | --cidr <cidr> | --port <port> [--protocol tcp|udp|any] [--direction egress|bind|both]"
+              << " | network deny {list|clear}"
+              << " | network stats"
               << " | survival {list|verify}"
               << " | policy {lint|apply|export} <file> [--reset] [--sha256 <hex>|--sha256-file <path>] [--no-rollback] [--require-signature]"
               << " | policy sign <policy.conf> --key <private.key> --output <policy.signed>"
@@ -1429,6 +1786,96 @@ int main(int argc, char** argv)
                 return usage(argv[0]);
             }
             return allow_list();
+        }
+        return usage(argv[0]);
+    }
+
+    if (cmd == "network") {
+        if (argc < 3) {
+            return usage(argv[0]);
+        }
+        std::string sub = argv[2];
+
+        if (sub == "stats") {
+            return network_stats();
+        }
+
+        if (sub == "deny") {
+            if (argc < 4) {
+                return usage(argv[0]);
+            }
+            std::string action = argv[3];
+
+            if (action == "list") {
+                return network_deny_list();
+            }
+            if (action == "clear") {
+                return network_deny_clear();
+            }
+
+            if (action == "add" || action == "del") {
+                std::string ip;
+                std::string cidr;
+                uint16_t port = 0;
+                std::string protocol = "any";
+                std::string direction = "both";
+
+                for (int i = 4; i < argc; ++i) {
+                    std::string arg = argv[i];
+                    if (arg == "--ip") {
+                        if (i + 1 >= argc) return usage(argv[0]);
+                        ip = argv[++i];
+                    } else if (arg == "--cidr") {
+                        if (i + 1 >= argc) return usage(argv[0]);
+                        cidr = argv[++i];
+                    } else if (arg == "--port") {
+                        if (i + 1 >= argc) return usage(argv[0]);
+                        uint64_t p = 0;
+                        if (!parse_uint64(argv[++i], p) || p == 0 || p > 65535) {
+                            logger().log(SLOG_ERROR("Invalid port number"));
+                            return 1;
+                        }
+                        port = static_cast<uint16_t>(p);
+                    } else if (arg == "--protocol") {
+                        if (i + 1 >= argc) return usage(argv[0]);
+                        protocol = argv[++i];
+                    } else if (arg == "--direction") {
+                        if (i + 1 >= argc) return usage(argv[0]);
+                        direction = argv[++i];
+                    } else {
+                        return usage(argv[0]);
+                    }
+                }
+
+                // Validate that at least one rule type is specified
+                int rule_count = (!ip.empty() ? 1 : 0) + (!cidr.empty() ? 1 : 0) + (port != 0 ? 1 : 0);
+                if (rule_count != 1) {
+                    logger().log(SLOG_ERROR("Specify exactly one of --ip, --cidr, or --port"));
+                    return 1;
+                }
+
+                if (action == "add") {
+                    if (!ip.empty()) {
+                        return network_deny_add_ip(ip);
+                    }
+                    if (!cidr.empty()) {
+                        return network_deny_add_cidr(cidr);
+                    }
+                    if (port != 0) {
+                        return network_deny_add_port(port, protocol, direction);
+                    }
+                } else {  // del
+                    if (!ip.empty()) {
+                        return network_deny_del_ip(ip);
+                    }
+                    if (!cidr.empty()) {
+                        return network_deny_del_cidr(cidr);
+                    }
+                    if (port != 0) {
+                        return network_deny_del_port(port, protocol, direction);
+                    }
+                }
+            }
         }
         return usage(argv[0]);
     }
