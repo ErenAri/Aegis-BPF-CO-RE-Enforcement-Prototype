@@ -112,6 +112,43 @@ void journal_send_block(const BlockEvent& ev, const std::string& payload, const 
         static_cast<const char*>(nullptr));
     journal_report_error(rc);
 }
+
+void journal_send_net_block(const NetBlockEvent& ev, const std::string& payload, const std::string& cgpath,
+                            const std::string& comm, const std::string& exec_id, const std::string& parent_exec_id,
+                            const std::string& event_type, const std::string& remote_ip)
+{
+    int priority = LOG_WARNING;  // Network blocks are warnings by default
+    std::string protocol = (ev.protocol == 6) ? "tcp" : (ev.protocol == 17) ? "udp" : std::to_string(ev.protocol);
+    std::string family = (ev.family == 2) ? "ipv4" : "ipv6";
+    std::string direction = (ev.direction == 0) ? "egress" : "bind";
+    std::string rule_type = to_string(ev.rule_type, sizeof(ev.rule_type));
+    std::string action = to_string(ev.action, sizeof(ev.action));
+
+    int rc = sd_journal_send(
+        "MESSAGE=%s", payload.c_str(),
+        "SYSLOG_IDENTIFIER=aegisbpf",
+        "AEGIS_TYPE=%s", event_type.c_str(),
+        "AEGIS_PID=%u", ev.pid,
+        "AEGIS_PPID=%u", ev.ppid,
+        "AEGIS_START_TIME=%llu", static_cast<unsigned long long>(ev.start_time),
+        "AEGIS_EXEC_ID=%s", exec_id.c_str(),
+        "AEGIS_PARENT_START_TIME=%llu", static_cast<unsigned long long>(ev.parent_start_time),
+        "AEGIS_PARENT_EXEC_ID=%s", parent_exec_id.c_str(),
+        "AEGIS_CGID=%llu", static_cast<unsigned long long>(ev.cgid),
+        "AEGIS_CGROUP_PATH=%s", cgpath.c_str(),
+        "AEGIS_FAMILY=%s", family.c_str(),
+        "AEGIS_PROTOCOL=%s", protocol.c_str(),
+        "AEGIS_DIRECTION=%s", direction.c_str(),
+        "AEGIS_REMOTE_IP=%s", remote_ip.c_str(),
+        "AEGIS_REMOTE_PORT=%u", ev.remote_port,
+        "AEGIS_LOCAL_PORT=%u", ev.local_port,
+        "AEGIS_RULE_TYPE=%s", rule_type.c_str(),
+        "AEGIS_ACTION=%s", action.c_str(),
+        "AEGIS_COMM=%s", comm.c_str(),
+        "PRIORITY=%i", priority,
+        static_cast<const char*>(nullptr));
+    journal_report_error(rc);
+}
 #endif
 
 void print_exec_event(const ExecEvent& ev)
@@ -262,7 +299,12 @@ void print_net_block_event(const NetBlockEvent& ev)
     if (sink_wants_stdout(g_event_sink)) {
         std::cout << payload << std::endl;
     }
-    // TODO: Add journald support for network events
+#ifdef HAVE_SYSTEMD
+    if (sink_wants_journald(g_event_sink)) {
+        std::string remote_ip = (ev.family == 2) ? format_ipv4_addr(ev.remote_ipv4) : "";
+        journal_send_net_block(ev, payload, cgpath, comm, exec_id, parent_exec_id, event_type, remote_ip);
+    }
+#endif
 }
 
 // cppcheck-suppress constParameterPointer

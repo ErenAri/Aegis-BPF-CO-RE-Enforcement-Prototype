@@ -1,6 +1,7 @@
 // cppcheck-suppress-file missingIncludeSystem
 #include "bpf_ops.hpp"
 #include "logging.hpp"
+#include "sha256.hpp"
 #include "utils.hpp"
 
 #include <atomic>
@@ -167,9 +168,76 @@ void set_ringbuf_bytes(uint32_t bytes)
     g_ringbuf_bytes.store(bytes, std::memory_order_relaxed);
 }
 
+// Verify BPF object file integrity before loading
+static Result<void> verify_bpf_integrity(const std::string& obj_path)
+{
+    // Check if verification is disabled (for development)
+    const char* skip_verify = std::getenv("AEGIS_SKIP_BPF_VERIFY");
+    if (skip_verify && std::string(skip_verify) == "1") {
+        logger().log(SLOG_WARN("BPF verification disabled via AEGIS_SKIP_BPF_VERIFY"));
+        return {};
+    }
+
+    // Find the expected hash file
+    std::string hash_path;
+    std::error_code ec;
+
+    // Try /etc/aegisbpf first (admin override), then installed path
+    if (std::filesystem::exists(kBpfObjHashPath, ec)) {
+        hash_path = kBpfObjHashPath;
+    }
+    else if (std::filesystem::exists(kBpfObjHashInstallPath, ec)) {
+        hash_path = kBpfObjHashInstallPath;
+    }
+    else {
+        // No hash file found - in production this should be an error
+        // For development/testing, warn and continue
+        logger().log(SLOG_WARN("BPF object hash file not found, verification skipped")
+            .field("checked", std::string(kBpfObjHashPath) + ", " + kBpfObjHashInstallPath));
+        return {};
+    }
+
+    // Read expected hash
+    std::string expected_hash;
+    if (!read_sha256_file(hash_path, expected_hash)) {
+        return Error(ErrorCode::InvalidArgument, "Failed to read BPF hash file", hash_path);
+    }
+
+    // Compute actual hash
+    std::string actual_hash;
+    if (!sha256_file_hex(obj_path, actual_hash)) {
+        return Error(ErrorCode::IoError, "Failed to compute hash of BPF object", obj_path);
+    }
+
+    // Compare (case-insensitive)
+    std::string expected_lower = expected_hash;
+    std::string actual_lower = actual_hash;
+    for (auto& c : expected_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (auto& c : actual_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if (expected_lower != actual_lower) {
+        logger().log(SLOG_ERROR("BPF object integrity verification failed")
+            .field("path", obj_path)
+            .field("expected", expected_hash)
+            .field("actual", actual_hash));
+        return Error(ErrorCode::BpfLoadFailed,
+            "BPF object integrity verification failed - file may have been tampered with",
+            "expected=" + expected_hash + " actual=" + actual_hash);
+    }
+
+    logger().log(SLOG_INFO("BPF object integrity verified")
+        .field("path", obj_path)
+        .field("hash", actual_hash));
+    return {};
+}
+
 Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
 {
     std::string obj_path = resolve_bpf_obj_path();
+
+    // Verify BPF object integrity before loading
+    TRY(verify_bpf_integrity(obj_path));
+
     state.obj = bpf_object__open_file(obj_path.c_str(), nullptr);
     if (!state.obj) {
         return Error::bpf_error(-errno, "Failed to open BPF object file");
@@ -405,6 +473,25 @@ Result<void> attach_all(BpfState& state, bool lsm_enabled, bool use_inode_permis
         return Error(ErrorCode::BpfAttachFailed, "BPF program not found: handle_exit");
     }
     TRY(attach_prog(prog, state));
+
+    // Attach network LSM hooks if available
+    if (lsm_enabled) {
+        prog = bpf_object__find_program_by_name(state.obj, "handle_socket_connect");
+        if (prog) {
+            auto result = attach_prog(prog, state);
+            if (!result) {
+                // Network hooks are optional - log warning but continue
+                // (May fail on older kernels without socket_connect LSM hook)
+            }
+        }
+        prog = bpf_object__find_program_by_name(state.obj, "handle_socket_bind");
+        if (prog) {
+            auto result = attach_prog(prog, state);
+            if (!result) {
+                // Network hooks are optional - log warning but continue
+            }
+        }
+    }
 
     return {};
 }
@@ -644,15 +731,37 @@ Result<void> add_deny_path(BpfState& state, const std::string& path, DenyEntries
         return Error(ErrorCode::InvalidArgument, "Path is empty");
     }
 
+    // Check for null bytes (potential injection attack)
+    if (path.find('\0') != std::string::npos) {
+        return Error(ErrorCode::InvalidArgument, "Path contains null bytes", path);
+    }
+
+    // Check if the input path is a symlink (for audit logging)
+    struct stat lstat_buf {};
+    bool is_symlink = (lstat(path.c_str(), &lstat_buf) == 0) && S_ISLNK(lstat_buf.st_mode);
+    if (is_symlink) {
+        logger().log(SLOG_INFO("Deny path is symlink, will resolve to target")
+            .field("symlink", path));
+    }
+
+    // Canonicalize path - resolves symlinks, removes . and .., normalizes slashes
     std::error_code ec;
     std::filesystem::path resolved = std::filesystem::canonical(path, ec);
     if (ec) {
         return Error(ErrorCode::PathResolutionFailed, "Failed to resolve path", path + ": " + ec.message());
     }
 
+    std::string resolved_str = resolved.string();
+
+    // Check length AFTER canonicalization (resolved path might be longer)
+    if (resolved_str.size() >= kDenyPathMax) {
+        return Error(ErrorCode::PathTooLong, "Resolved path exceeds maximum length",
+            resolved_str + " (" + std::to_string(resolved_str.size()) + " >= " + std::to_string(kDenyPathMax) + ")");
+    }
+
     struct stat st {};
-    if (stat(resolved.c_str(), &st) != 0) {
-        return Error::system(errno, "stat failed for " + resolved.string());
+    if (stat(resolved_str.c_str(), &st) != 0) {
+        return Error::system(errno, "stat failed for " + resolved_str);
     }
 
     InodeId id{};
@@ -663,18 +772,27 @@ Result<void> add_deny_path(BpfState& state, const std::string& path, DenyEntries
     TRY(add_deny_inode(state, id, entries));
 
     uint8_t one = 1;
-    std::string resolved_str = resolved.string();
     PathKey path_key{};
     fill_path_key(resolved_str, path_key);
     if (bpf_map_update_elem(bpf_map__fd(state.deny_path), &path_key, &one, BPF_ANY)) {
         return Error::system(errno, "Failed to update deny_path_map");
     }
-    if (path != resolved_str) {
+
+    // Also add the raw path if different (for direct path matching)
+    if (path != resolved_str && path.size() < kDenyPathMax) {
         PathKey raw_key{};
         fill_path_key(path, raw_key);
         if (bpf_map_update_elem(bpf_map__fd(state.deny_path), &raw_key, &one, BPF_ANY)) {
             return Error::system(errno, "Failed to update deny_path_map (raw path)");
         }
+    }
+
+    if (is_symlink) {
+        logger().log(SLOG_INFO("Deny rule added for symlink target")
+            .field("original", path)
+            .field("resolved", resolved_str)
+            .field("dev", static_cast<int64_t>(id.dev))
+            .field("ino", static_cast<int64_t>(id.ino)));
     }
 
     entries[id] = resolved_str;

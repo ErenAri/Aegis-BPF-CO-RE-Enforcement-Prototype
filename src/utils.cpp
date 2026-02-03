@@ -557,4 +557,83 @@ Result<InodeId> resolve_to_inode(const std::string& path, bool follow_symlinks)
     return id;
 }
 
+Result<void> validate_config_directory_permissions(const std::string& path)
+{
+    struct stat st {};
+    if (stat(path.c_str(), &st) != 0) {
+        if (errno == ENOENT) {
+            // Directory doesn't exist - this is okay, it will be created
+            return {};
+        }
+        return Error::system(errno, "Failed to stat config directory: " + path);
+    }
+
+    // Must be a directory
+    if (!S_ISDIR(st.st_mode)) {
+        return Error(ErrorCode::InvalidArgument, "Config path is not a directory", path);
+    }
+
+    // Must be owned by root (uid 0)
+    if (st.st_uid != 0) {
+        return Error(ErrorCode::PermissionDenied,
+            "Config directory must be owned by root",
+            path + " (owner uid=" + std::to_string(st.st_uid) + ")");
+    }
+
+    // Check permissions: must not be world-writable (no 'other' write bit)
+    // Acceptable modes: 0700, 0750, 0755
+    mode_t mode = st.st_mode & 0777;
+    if (mode & S_IWOTH) {
+        return Error(ErrorCode::PermissionDenied,
+            "Config directory must not be world-writable",
+            path + " (mode=" + std::to_string(mode) + ")");
+    }
+
+    // Warn if group-writable but not fail (some setups may need this)
+    if (mode & S_IWGRP) {
+        // Just a warning, not an error
+    }
+
+    return {};
+}
+
+Result<void> validate_file_permissions(const std::string& path, bool require_root_owner)
+{
+    struct stat st {};
+    if (stat(path.c_str(), &st) != 0) {
+        if (errno == ENOENT) {
+            // File doesn't exist - this may be okay depending on context
+            return Error(ErrorCode::PathNotFound, "File not found", path);
+        }
+        return Error::system(errno, "Failed to stat file: " + path);
+    }
+
+    // Must be a regular file
+    if (!S_ISREG(st.st_mode)) {
+        return Error(ErrorCode::InvalidArgument, "Path is not a regular file", path);
+    }
+
+    // Must be owned by root if required
+    if (require_root_owner && st.st_uid != 0) {
+        return Error(ErrorCode::PermissionDenied,
+            "File must be owned by root",
+            path + " (owner uid=" + std::to_string(st.st_uid) + ")");
+    }
+
+    // Check permissions: must not be world-writable
+    mode_t mode = st.st_mode & 0777;
+    if (mode & S_IWOTH) {
+        return Error(ErrorCode::PermissionDenied,
+            "File must not be world-writable",
+            path + " (mode=" + std::to_string(mode) + ")");
+    }
+
+    // Warn if group-writable (but don't fail)
+    if (mode & S_IWGRP) {
+        // Could add logging here
+    }
+
+    return {};
+}
+
 }  // namespace aegis

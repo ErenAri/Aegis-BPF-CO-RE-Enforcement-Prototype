@@ -314,6 +314,17 @@ Result<void> reset_policy_maps(BpfState& state)
         TRY(reset_block_stats_map(state.block_stats));
     }
 
+    // Clear network maps if available
+    if (state.deny_ipv4) {
+        TRY(clear_map_entries(state.deny_ipv4));
+    }
+    if (state.deny_port) {
+        TRY(clear_map_entries(state.deny_port));
+    }
+    if (state.deny_cidr_v4) {
+        TRY(clear_map_entries(state.deny_cidr_v4));
+    }
+
     std::error_code ec;
     std::filesystem::remove(kDenyDbPath, ec);
     return {};
@@ -385,6 +396,38 @@ Result<void> apply_policy_internal(const std::string& path, const std::string& c
         if (!result) {
             return result.error();
         }
+    }
+
+    // Apply network rules if enabled
+    if (policy.network.enabled) {
+        for (const auto& ip : policy.network.deny_ips) {
+            auto result = add_deny_ipv4(state, ip);
+            if (!result) {
+                logger().log(SLOG_WARN("Failed to add deny IP")
+                    .field("ip", ip)
+                    .field("error", result.error().message()));
+            }
+        }
+        for (const auto& cidr : policy.network.deny_cidrs) {
+            auto result = add_deny_cidr_v4(state, cidr);
+            if (!result) {
+                logger().log(SLOG_WARN("Failed to add deny CIDR")
+                    .field("cidr", cidr)
+                    .field("error", result.error().message()));
+            }
+        }
+        for (const auto& port_rule : policy.network.deny_ports) {
+            auto result = add_deny_port(state, port_rule.port, port_rule.protocol, port_rule.direction);
+            if (!result) {
+                logger().log(SLOG_WARN("Failed to add deny port")
+                    .field("port", static_cast<int64_t>(port_rule.port))
+                    .field("error", result.error().message()));
+            }
+        }
+        logger().log(SLOG_INFO("Network policy applied")
+            .field("deny_ips", static_cast<int64_t>(policy.network.deny_ips.size()))
+            .field("deny_cidrs", static_cast<int64_t>(policy.network.deny_cidrs.size()))
+            .field("deny_ports", static_cast<int64_t>(policy.network.deny_ports.size())));
     }
 
     auto write_result = write_deny_db(entries);

@@ -39,6 +39,8 @@ inline constexpr const char* kDenyDbPath = "/var/lib/aegisbpf/deny.db";
 inline constexpr const char* kPolicyAppliedPath = "/var/lib/aegisbpf/policy.applied";
 inline constexpr const char* kPolicyAppliedPrevPath = "/var/lib/aegisbpf/policy.applied.prev";
 inline constexpr const char* kPolicyAppliedHashPath = "/var/lib/aegisbpf/policy.applied.sha256";
+inline constexpr const char* kBpfObjHashPath = "/etc/aegisbpf/aegis.bpf.sha256";
+inline constexpr const char* kBpfObjHashInstallPath = "/usr/lib/aegisbpf/aegis.bpf.sha256";
 inline constexpr uint32_t kLayoutVersion = 1;
 inline constexpr size_t kDenyPathMax = 256;
 

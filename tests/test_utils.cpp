@@ -251,5 +251,40 @@ TEST(ValidatePathTest, PathTooLong)
     EXPECT_EQ(result.error().code(), ErrorCode::PathTooLong);
 }
 
+TEST(ValidatePathTest, PathWithNullBytes)
+{
+    std::string path_with_null = "/etc/shadow";
+    path_with_null += '\0';
+    path_with_null += "malicious";
+    auto result = validate_path(path_with_null);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error().code(), ErrorCode::InvalidArgument);
+}
+
+TEST(ValidateExistingPathTest, NonExistentPath)
+{
+    auto result = validate_existing_path("/nonexistent/path/to/nowhere");
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error().code(), ErrorCode::PathNotFound);
+}
+
+TEST(ValidateExistingPathTest, ExistingPath)
+{
+    // /etc should exist on all Linux systems
+    auto result = validate_existing_path("/etc");
+    EXPECT_TRUE(result);
+    EXPECT_EQ(*result, "/etc");
+}
+
+TEST(ValidateExistingPathTest, SymlinkResolution)
+{
+    // /bin is often a symlink to /usr/bin on modern systems
+    auto result = validate_existing_path("/bin");
+    if (result) {
+        // Just verify it returns a canonicalized path
+        EXPECT_TRUE(result->front() == '/');
+    }
+}
+
 }  // namespace
 }  // namespace aegis

@@ -116,6 +116,17 @@ if(NOT SKIP_BPF_BUILD)
 
     set_source_files_properties(${SKELETON_HEADER} PROPERTIES GENERATED TRUE)
     add_custom_target(bpf_skel DEPENDS ${SKELETON_HEADER})
+
+    # Generate BPF object hash for integrity verification
+    set(BPF_HASH_FILE ${CMAKE_CURRENT_BINARY_DIR}/aegis.bpf.sha256)
+    add_custom_command(
+        OUTPUT ${BPF_HASH_FILE}
+        COMMAND ${BASH} -c "sha256sum ${BPF_OBJECT} | cut -d' ' -f1 > ${BPF_HASH_FILE}"
+        DEPENDS ${BPF_OBJECT}
+        VERBATIM
+    )
+    add_custom_target(bpf_hash DEPENDS ${BPF_HASH_FILE})
+    add_dependencies(bpf_skel bpf_hash)
 else()
     # When skipping BPF build, create a dummy target
     add_custom_target(bpf_skel)
@@ -125,6 +136,8 @@ endif()
 # Userspace source files
 set(AEGIS_SOURCES
     src/main.cpp
+    src/commands.cpp
+    src/daemon.cpp
     src/bpf_ops.cpp
     src/crypto.cpp
     src/events.cpp
@@ -138,6 +151,8 @@ set(AEGIS_SOURCES
 )
 
 set(AEGIS_HEADERS
+    src/commands.hpp
+    src/daemon.hpp
     src/bpf_ops.hpp
     src/crypto.hpp
     src/events.hpp
@@ -181,6 +196,8 @@ target_compile_definitions(aegisbpf PRIVATE AEGIS_BPF_OBJ_PATH="${BPF_OBJECT}")
 
 # Build library for testing (without main)
 set(AEGIS_LIB_SOURCES
+    src/commands.cpp
+    src/daemon.cpp
     src/bpf_ops.cpp
     src/crypto.cpp
     src/events.cpp
@@ -231,6 +248,7 @@ if(BUILD_TESTING)
         tests/test_result.cpp
         tests/test_sha256.cpp
         tests/test_policy.cpp
+        tests/test_network.cpp
     )
 
     add_executable(aegisbpf_test ${TEST_SOURCES})
@@ -295,11 +313,35 @@ if(ENABLE_FUZZING)
     target_include_directories(fuzz_bundle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_options(fuzz_bundle PRIVATE -fsanitize=fuzzer,address -fno-omit-frame-pointer)
     target_link_options(fuzz_bundle PRIVATE -fsanitize=fuzzer,address)
+
+    # Network rules fuzzer
+    add_executable(fuzz_network tests/fuzz/fuzz_network_rules.cpp)
+    target_link_libraries(fuzz_network PRIVATE aegisbpf_lib)
+    target_include_directories(fuzz_network PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(fuzz_network PRIVATE -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+    target_link_options(fuzz_network PRIVATE -fsanitize=fuzzer,address)
+
+    # Path validation fuzzer
+    add_executable(fuzz_path tests/fuzz/fuzz_path_validation.cpp)
+    target_link_libraries(fuzz_path PRIVATE aegisbpf_lib)
+    target_include_directories(fuzz_path PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(fuzz_path PRIVATE -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+    target_link_options(fuzz_path PRIVATE -fsanitize=fuzzer,address)
+
+    # Event handling fuzzer
+    add_executable(fuzz_event tests/fuzz/fuzz_event_handling.cpp)
+    target_link_libraries(fuzz_event PRIVATE aegisbpf_lib)
+    target_include_directories(fuzz_event PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(fuzz_event PRIVATE -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+    target_link_options(fuzz_event PRIVATE -fsanitize=fuzzer,address)
 endif()
 
 # Installation
 install(TARGETS aegisbpf RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES ${BPF_OBJECT} DESTINATION ${CMAKE_INSTALL_LIBDIR}/aegisbpf)
+if(NOT SKIP_BPF_BUILD)
+    install(FILES ${BPF_HASH_FILE} DESTINATION ${CMAKE_INSTALL_LIBDIR}/aegisbpf RENAME aegis.bpf.sha256)
+endif()
 install(FILES packaging/systemd/aegisbpf.service DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/system)
 install(FILES packaging/systemd/aegisbpf.env DESTINATION /etc/default RENAME aegisbpf)
 install(FILES config/policy.example DESTINATION /etc/aegisbpf)

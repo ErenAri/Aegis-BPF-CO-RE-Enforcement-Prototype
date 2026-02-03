@@ -3,15 +3,24 @@ Description=AegisBPF Runtime Security Agent
 After=network.target
 ConditionPathExists=/sys/fs/bpf
 ConditionPathExists=/sys/fs/cgroup/cgroup.controllers
+# Restart loop protection: max 5 restarts in 5 minutes
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 EnvironmentFile=-/etc/default/aegisbpf
-ExecStartPre=/bin/sh -c '[ -n "${AEGIS_POLICY:-}" ] && [ -f "${AEGIS_POLICY}" ] && /usr/bin/aegisbpf policy apply "${AEGIS_POLICY}" --reset'
+
+# Validate environment variables before starting
+ExecStartPre=/bin/sh -c 'if [ -n "${AEGIS_MODE:-}" ]; then case "${AEGIS_MODE}" in --audit|--enforce|--mode=audit|--mode=enforce) ;; *) echo "Invalid AEGIS_MODE: ${AEGIS_MODE}"; exit 1;; esac; fi'
+
+# Apply policy if configured
+ExecStartPre=/bin/sh -c '[ -n "${AEGIS_POLICY:-}" ] && [ -f "${AEGIS_POLICY}" ] && /usr/bin/aegisbpf policy apply "${AEGIS_POLICY}" --reset || true'
+
 ExecStart=/usr/bin/aegisbpf run ${AEGIS_MODE} ${AEGIS_LOG}
 ExecStartPost=/bin/sh -c '[ "${AEGIS_SMOKE_TEST:-0}" = "1" ] && /usr/bin/aegisbpf health || true'
 Restart=on-failure
-RestartSec=2
+RestartSec=5
 LimitMEMLOCK=infinity
 StateDirectory=aegisbpf
 NoNewPrivileges=true
@@ -29,8 +38,8 @@ MemoryDenyWriteExecute=true
 RestrictRealtime=true
 SystemCallArchitectures=native
 ReadWritePaths=/sys/fs/bpf /sys/fs/cgroup /var/lib/aegisbpf
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_RESOURCE CAP_BPF CAP_PERFMON
-AmbientCapabilities=CAP_SYS_ADMIN CAP_SYS_RESOURCE CAP_BPF CAP_PERFMON
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_RESOURCE CAP_BPF CAP_PERFMON CAP_NET_ADMIN
+AmbientCapabilities=CAP_SYS_ADMIN CAP_SYS_RESOURCE CAP_BPF CAP_PERFMON CAP_NET_ADMIN
 
 [Install]
 WantedBy=multi-user.target

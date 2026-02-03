@@ -56,6 +56,10 @@ std::string build_exec_id(uint32_t pid, uint64_t start_time);
 // Break-glass detection
 bool detect_break_glass();
 
+// Security validation
+Result<void> validate_config_directory_permissions(const std::string& path);
+Result<void> validate_file_permissions(const std::string& path, bool require_root_owner = true);
+
 // Path canonicalization for policy identity
 Result<std::pair<InodeId, std::string>> canonicalize_path(const std::string& path);
 Result<InodeId> resolve_to_inode(const std::string& path, bool follow_symlinks = true);
