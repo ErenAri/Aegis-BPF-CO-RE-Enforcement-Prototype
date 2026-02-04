@@ -34,7 +34,8 @@ AegisBPF operates in one of three capability levels based on kernel support:
 
 **Capabilities:**
 - Block file access (returns `EPERM`)
-- Optional enforce signal (`SIGTERM` by default, configurable to `SIGKILL`, `SIGINT`, or none)
+- Optional enforce signal (`SIGTERM` by default; `SIGKILL` requires build-time
+  `-DENABLE_SIGKILL_ENFORCEMENT=ON` and runtime `--allow-sigkill`)
 - Inode-based tracking
 - Full audit logging
 
@@ -75,6 +76,9 @@ AegisBPF cannot run if:
 | Amazon Linux | 2023 | 6.1+ | Yes* | Yes | Add `lsm=bpf` to boot params |
 
 \* Requires adding `lsm=bpf` or `lsm=landlock,lockdown,yama,bpf` to kernel boot parameters.
+
+Compatibility CI evidence and kernel/distro matrix source of truth are tracked
+in `docs/PHASE4_PORTABILITY_EVIDENCE.md`.
 
 ## Distribution and Runtime Quirks
 

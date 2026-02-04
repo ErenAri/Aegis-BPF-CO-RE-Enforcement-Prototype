@@ -215,6 +215,7 @@ jobs:
             --suppress=missingIncludeSystem \
             --suppress=unmatchedSuppression \
             --suppress=syntaxError:tests/test_commands.cpp \
+            --suppress=syntaxError:tests/test_kernel_features.cpp \
             --suppress=syntaxError:tests/test_tracing.cpp \
             --suppress=useStlAlgorithm \
             --suppress=constParameterReference \

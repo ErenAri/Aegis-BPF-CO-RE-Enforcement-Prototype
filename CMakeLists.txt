@@ -22,6 +22,9 @@ option(BUILD_TESTING "Build tests" ON)
 option(BUILD_BENCHMARKS "Build benchmark targets when tests are enabled" ON)
 option(ENABLE_FUZZING "Enable fuzzing targets" OFF)
 option(SKIP_BPF_BUILD "Skip BPF object compilation (for cross-compilation)" OFF)
+option(ENABLE_SIGKILL_ENFORCEMENT
+       "Enable dangerous SIGKILL enforcement path (still requires --allow-sigkill at runtime)"
+       OFF)
 
 find_program(CLANG clang REQUIRED)
 find_program(BASH bash REQUIRED)
@@ -221,7 +224,16 @@ endif()
 
 set(AEGIS_BPF_OBJ_DEFINE_PATH "${BPF_OBJECT}" CACHE STRING
     "Path embedded into binaries for default BPF object lookup")
-target_compile_definitions(aegisbpf PRIVATE AEGIS_BPF_OBJ_PATH="${AEGIS_BPF_OBJ_DEFINE_PATH}")
+if(ENABLE_SIGKILL_ENFORCEMENT)
+    set(AEGIS_SIGKILL_ENFORCEMENT_DEFINE 1)
+else()
+    set(AEGIS_SIGKILL_ENFORCEMENT_DEFINE 0)
+endif()
+
+target_compile_definitions(aegisbpf PRIVATE
+    AEGIS_BPF_OBJ_PATH="${AEGIS_BPF_OBJ_DEFINE_PATH}"
+    AEGIS_ENABLE_SIGKILL_ENFORCEMENT=${AEGIS_SIGKILL_ENFORCEMENT_DEFINE}
+)
 
 # Build library for testing (without main)
 set(AEGIS_LIB_SOURCES
@@ -252,6 +264,7 @@ target_include_directories(aegisbpf_lib PUBLIC
 target_link_directories(aegisbpf_lib PUBLIC ${LIBBPF_LIBRARY_DIRS})
 target_link_libraries(aegisbpf_lib PUBLIC ${LIBBPF_LIBRARIES})
 target_compile_definitions(aegisbpf_lib PRIVATE AEGIS_BPF_OBJ_PATH="${AEGIS_BPF_OBJ_DEFINE_PATH}")
+target_compile_definitions(aegisbpf_lib PUBLIC AEGIS_ENABLE_SIGKILL_ENFORCEMENT=${AEGIS_SIGKILL_ENFORCEMENT_DEFINE})
 
 if (SYSTEMD_FOUND)
     target_compile_definitions(aegisbpf_lib PRIVATE HAVE_SYSTEMD)
@@ -278,6 +291,7 @@ if(BUILD_TESTING)
     set(TEST_SOURCES
         tests/test_main.cpp
         tests/test_commands.cpp
+        tests/test_kernel_features.cpp
         tests/test_utils.cpp
         tests/test_result.cpp
         tests/test_sha256.cpp
@@ -383,6 +397,54 @@ if(BUILD_TESTING)
     )
 
     add_test(
+        NAME phase3_safety_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase3_safety_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE3_OPERATIONAL_SAFETY_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tracing.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_policy.cpp
+    )
+
+    add_test(
+        NAME phase4_portability_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase4_portability_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/kernel-matrix.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/COMPATIBILITY.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE4_PORTABILITY_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_kernel_features.cpp
+    )
+
+    add_test(
+        NAME phase5_performance_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase5_performance_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PERF.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE5_PERFORMANCE_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/perf.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/perf_open_bench.sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/perf_connect_bench.sh
+    )
+
+    add_test(
+        NAME phase6_meta_security_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase6_meta_security_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE6_META_SECURITY_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/release.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/SECURITY.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/KEY_MANAGEMENT.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_commands.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/packaging/systemd/aegisbpf.service
+    )
+
+    add_test(
+        NAME phase7_reviewability_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase7_reviewability_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE7_REVIEWABILITY_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/PULL_REQUEST_TEMPLATE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/GO_LIVE_CHECKLIST.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/MATURITY_PROGRAM.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/README.md
+    )
+
+    add_test(
         NAME runbooks_contract
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_runbooks_contract.py
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/runbooks
@@ -442,6 +504,12 @@ if(BUILD_TESTING)
         COMMAND $<TARGET_FILE:aegisbpf> run --enforce --enforce-signal=bad
     )
     set_tests_properties(cli_run_rejects_invalid_enforce_signal PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_run_rejects_sigkill_without_allow_gate
+        COMMAND $<TARGET_FILE:aegisbpf> run --enforce --enforce-signal=kill
+    )
+    set_tests_properties(cli_run_rejects_sigkill_without_allow_gate PROPERTIES WILL_FAIL TRUE)
 
     add_test(
         NAME cli_run_rejects_zero_kill_escalation_threshold
