@@ -739,5 +739,7 @@ git push origin v0.2.0
 
 - [API_REFERENCE.md](API_REFERENCE.md) - API documentation
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design
+- [THREAT_MODEL.md](THREAT_MODEL.md) - Security scope and blind spots
+- [POLICY_SEMANTICS.md](POLICY_SEMANTICS.md) - Runtime policy behavior
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
 - [VENDORED_DEPENDENCIES.md](VENDORED_DEPENDENCIES.md) - Vendored dependency tracking

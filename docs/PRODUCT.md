@@ -3,6 +3,9 @@
 This document defines the minimum product requirements and threat model for a
 senior-level, production-ready AegisBPF agent.
 
+For full attacker-model detail, coverage boundaries, and known bypass surfaces,
+see `docs/THREAT_MODEL.md`.
+
 ## Target environment
 - Linux kernel with BTF enabled and `CONFIG_BPF_LSM=y`.
 - cgroup v2 mounted at `/sys/fs/cgroup`.
@@ -35,6 +38,7 @@ Security goals:
 - Emit audit events for denied paths (even when only tracepoint fallback is
   available).
 - Keep policy state isolated in bpffs and resist accidental corruption.
+- Explicitly document and monitor non-covered paths and degraded modes.
 
 ## Functional requirements
 - Deny rules by inode/device and by path (for audit fallback).

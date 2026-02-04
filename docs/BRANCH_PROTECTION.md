@@ -26,6 +26,9 @@ in sync by `.github/workflows/label-sync.yml`.
 
 Use `config/required_checks.txt` as the source of truth.
 
+Check names are stored as **job names** (for example, `build (ubuntu-24.04)`
+or `semgrep`) to match GitHub branch-protection contexts directly.
+
 For protected `release/*` branches, use `config/required_checks_release.txt`.
 
 ## Audit command

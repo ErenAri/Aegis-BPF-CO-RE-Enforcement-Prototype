@@ -34,6 +34,7 @@ python3 "${ROOT_DIR}/tests/check_slo_contract.py" \
   "${ROOT_DIR}/docs/PRODUCT.md"
 python3 "${ROOT_DIR}/tests/check_support_policy.py" \
   "${ROOT_DIR}/docs/SUPPORT_POLICY.md"
+python3 "${ROOT_DIR}/tests/check_docs_security_contract.py"
 python3 "${ROOT_DIR}/tests/check_upgrade_compat.py" \
   "${ROOT_DIR}/${BUILD_DIR}/aegisbpf" \
   "${ROOT_DIR}/tests/fixtures/upgrade/policy_v1.conf" \

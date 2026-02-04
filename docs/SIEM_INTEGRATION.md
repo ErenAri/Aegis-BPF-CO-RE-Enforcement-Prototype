@@ -221,6 +221,7 @@ aegisbpf metrics --detailed --out /tmp/aegisbpf.debug.prom
 ```
 
 See [prometheus/alerts.yml](../config/prometheus/alerts.yml) for alert rules and [grafana/dashboard.json](../config/grafana/dashboard.json) for the Grafana dashboard.
+See `docs/METRICS_OPERATIONS.md` for threshold interpretation and operator response flow.
 
 Recommended SLO alerts:
 - `AegisBPFEventLossSLOViolation` (event-loss ratio > 0.1%)

@@ -488,6 +488,9 @@ sudo aegisbpf run --enforce --seccomp
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting, environment variables, and hardening details.
 
+Security boundaries, attacker model, and known blind spots are documented in
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+
 ## Documentation
 
 ### Core Documentation
@@ -498,7 +501,9 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting, environment variable
 | [API_REFERENCE.md](docs/API_REFERENCE.md) | API reference for types, functions, and BPF maps |
 | [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Development setup, coding standards, and contribution guide |
 | [POLICY.md](docs/POLICY.md) | Policy file format and semantics |
+| [POLICY_SEMANTICS.md](docs/POLICY_SEMANTICS.md) | Precise runtime rule semantics and edge-case behavior |
 | [NETWORK_LAYER_DESIGN.md](docs/NETWORK_LAYER_DESIGN.md) | Network blocking architecture |
+| [THREAT_MODEL.md](docs/THREAT_MODEL.md) | Threat model, coverage boundaries, and known bypass surface |
 
 ### Operations
 
@@ -510,6 +515,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting, environment variable
 | [RELEASE_DRILL.md](docs/RELEASE_DRILL.md) | Pre-release packaging and upgrade drill |
 | [KEY_MANAGEMENT.md](docs/KEY_MANAGEMENT.md) | Policy signing key rotation and revocation runbook |
 | [INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md) | Incident handling procedures |
+| [METRICS_OPERATIONS.md](docs/METRICS_OPERATIONS.md) | Metric interpretation, thresholds, and operator actions |
 | [runbooks/](docs/runbooks/) | Alert/incident/maintenance operational runbooks |
 | [VENDORED_DEPENDENCIES.md](docs/VENDORED_DEPENDENCIES.md) | Vendored dependency inventory and review cadence |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |

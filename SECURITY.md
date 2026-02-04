@@ -20,6 +20,18 @@ not include exploit details.
 
 Initial triage target: acknowledgement within 48 hours.
 
+## Threat Model and Security Boundaries
+
+Authoritative security scope is documented in `docs/THREAT_MODEL.md`.
+
+At a high level:
+- **In scope:** unprivileged process/container attempts to perform denied
+  file/network operations.
+- **Out of scope:** host root compromise, malicious kernel modules, and
+  physical/firmware attacks.
+- **Important boundary:** if BPF LSM is unavailable, AegisBPF degrades to
+  audit-only behavior and cannot enforce file denial.
+
 
 ## Security Hardening
 
@@ -164,3 +176,8 @@ The following environment variables affect security behavior. In production, avo
 1. **BPF LSM requirement**: Full blocking requires BPF LSM to be enabled in the kernel.
 2. **Root namespace only**: The agent must run in the host PID/cgroup namespace.
 3. **No live policy reload**: Policy changes require agent restart.
+4. **Namespace/path ambiguity**: Path canonicalization occurs in the agent mount
+   namespace; bind-mount and overlay paths can differ from workload-visible
+   paths.
+5. **Coverage limits**: Network enforcement currently focuses on connect/bind
+   hooks; other socket paths are not yet covered.

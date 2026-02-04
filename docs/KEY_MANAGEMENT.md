@@ -3,6 +3,13 @@
 This runbook defines how to rotate and revoke policy-signing keys used by
 AegisBPF signed policy bundles.
 
+## Strategy
+
+- Keep private keys outside hosts (KMS/HSM or offline signer).
+- Trust only root-owned public keys on hosts.
+- Enforce monotonic `policy_version` to block rollback bundles.
+- Treat key add/remove operations as security-change events with two-person review.
+
 ## Model
 
 - Trusted public keys are loaded from `/etc/aegisbpf/keys` (or
