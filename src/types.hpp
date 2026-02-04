@@ -91,16 +91,16 @@ struct NetBlockEvent {
     uint64_t parent_start_time;
     uint64_t cgid;
     char comm[16];
-    uint8_t family;        /* AF_INET=2 or AF_INET6=10 */
-    uint8_t protocol;      /* IPPROTO_TCP=6, IPPROTO_UDP=17 */
+    uint8_t family;   /* AF_INET=2 or AF_INET6=10 */
+    uint8_t protocol; /* IPPROTO_TCP=6, IPPROTO_UDP=17 */
     uint16_t local_port;
     uint16_t remote_port;
-    uint8_t direction;     /* 0=egress (connect), 1=bind */
+    uint8_t direction; /* 0=egress (connect), 1=bind */
     uint8_t _pad;
-    uint32_t remote_ipv4;  /* Network byte order */
+    uint32_t remote_ipv4; /* Network byte order */
     uint8_t remote_ipv6[16];
-    char action[8];        /* "AUDIT", "TERM", "KILL", or "BLOCK" */
-    char rule_type[16];    /* "ip", "port", "cidr" */
+    char action[8];     /* "AUDIT", "TERM", "KILL", or "BLOCK" */
+    char rule_type[16]; /* "ip", "port", "cidr" */
 };
 
 struct Event {
@@ -125,8 +125,8 @@ struct NetBlockStats {
 
 struct PortKey {
     uint16_t port;
-    uint8_t protocol;   /* 0=any, 6=tcp, 17=udp */
-    uint8_t direction;  /* 0=egress, 1=bind, 2=both */
+    uint8_t protocol;  /* 0=any, 6=tcp, 17=udp */
+    uint8_t direction; /* 0=egress, 1=bind, 2=both */
 
     bool operator==(const PortKey& other) const noexcept
     {
@@ -145,7 +145,7 @@ struct PortKeyHash {
 
 struct Ipv4LpmKey {
     uint32_t prefixlen;
-    uint32_t addr;  /* Network byte order */
+    uint32_t addr; /* Network byte order */
 };
 
 struct Ipv6Key {
@@ -158,7 +158,7 @@ struct Ipv6LpmKey {
 };
 
 struct NetIpKey {
-    uint8_t family;  /* AF_INET=2, AF_INET6=10 */
+    uint8_t family; /* AF_INET=2, AF_INET6=10 */
     uint8_t pad[3];
     uint8_t addr[16];
 };
@@ -224,8 +224,8 @@ struct AgentMeta {
 
 struct PortRule {
     uint16_t port;
-    uint8_t protocol;   /* 0=any, 6=tcp, 17=udp */
-    uint8_t direction;  /* 0=egress, 1=bind, 2=both */
+    uint8_t protocol;  /* 0=any, 6=tcp, 17=udp */
+    uint8_t direction; /* 0=egress, 1=bind, 2=both */
 };
 
 struct IpPortRule {
@@ -235,10 +235,10 @@ struct IpPortRule {
 };
 
 struct NetworkPolicy {
-    std::vector<std::string> deny_ips;       /* Exact IPv4/IPv6 addresses */
-    std::vector<std::string> deny_cidrs;     /* CIDR ranges */
-    std::vector<PortRule> deny_ports;        /* Port rules */
-    std::vector<IpPortRule> deny_ip_ports;   /* IP:port combos */
+    std::vector<std::string> deny_ips;     /* Exact IPv4/IPv6 addresses */
+    std::vector<std::string> deny_cidrs;   /* CIDR ranges */
+    std::vector<PortRule> deny_ports;      /* Port rules */
+    std::vector<IpPortRule> deny_ip_ports; /* IP:port combos */
     bool enabled = false;
 };
 

@@ -2,6 +2,26 @@
 set -euo pipefail
 
 BIN="${BIN:-./build/aegisbpf}"
+ENFORCE_SIGNAL="${ENFORCE_SIGNAL:-term}"
+
+case "${ENFORCE_SIGNAL}" in
+term)
+    EXPECTED_ACTION="TERM"
+    ;;
+kill)
+    EXPECTED_ACTION="KILL"
+    ;;
+int)
+    EXPECTED_ACTION="INT"
+    ;;
+none)
+    EXPECTED_ACTION="BLOCK"
+    ;;
+*)
+    echo "Unsupported ENFORCE_SIGNAL: ${ENFORCE_SIGNAL} (expected one of: term, kill, int, none)" >&2
+    exit 1
+    ;;
+esac
 
 cleanup() {
     if [[ -n "${AGENT_PID:-}" ]]; then
@@ -36,7 +56,7 @@ LOGFILE=$(mktemp)
 INO=$(stat -c %i "$TMPFILE")
 
 echo "[*] Starting agent (enforce mode)..."
-"$BIN" run --enforce --enforce-signal=kill >"$LOGFILE" 2>&1 &
+"$BIN" run --enforce --enforce-signal="${ENFORCE_SIGNAL}" >"$LOGFILE" 2>&1 &
 AGENT_PID=$!
 sleep 1
 if ! kill -0 "$AGENT_PID" 2>/dev/null; then
@@ -59,8 +79,8 @@ if [[ $status -eq 0 ]]; then
 fi
 
 sleep 1
-if ! grep -q "\"action\":\"KILL\"" "$LOGFILE"; then
-    echo "[!] Expected KILL event but none found; log follows:" >&2
+if ! grep -q "\"action\":\"${EXPECTED_ACTION}\"" "$LOGFILE"; then
+    echo "[!] Expected ${EXPECTED_ACTION} event but none found; log follows:" >&2
     cat "$LOGFILE" >&2
     exit 1
 fi

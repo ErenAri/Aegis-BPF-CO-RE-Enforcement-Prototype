@@ -1,0 +1,20 @@
+name: Key Rotation Drill
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 1 */3 *"
+
+jobs:
+  key-rotation-drill:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+
+      - name: Run key rotation drill
+        run: BUILD_DIR=build-key-drill scripts/key_rotation_drill.sh

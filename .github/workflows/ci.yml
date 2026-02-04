@@ -77,7 +77,12 @@ jobs:
         run: cmake --build build
 
       - name: Run tests with sanitizer
-        run: ctest --test-dir build --output-on-failure --timeout 300
+        run: |
+          if [ "${{ matrix.sanitizer }}" = "tsan" ]; then
+            setarch "$(uname -m)" -R ctest --test-dir build --output-on-failure --timeout 300
+          else
+            ctest --test-dir build --output-on-failure --timeout 300
+          fi
         env:
           ASAN_OPTIONS: abort_on_error=1:halt_on_error=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1

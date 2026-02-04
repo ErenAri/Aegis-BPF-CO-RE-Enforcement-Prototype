@@ -40,7 +40,9 @@ deliver each requirement.
 - Structured logging: JSON stdout with optional journald (`--log=journald`)
 - Service hardening: systemd sandboxing and capability bounds in unit file
 - Perf harness: `scripts/perf_open_bench.sh` + `scripts/perf_compare.sh` (see `docs/PERF.md`)
+- Real workload perf suite: `scripts/perf_workload_suite.sh`
 - Enforce smoke test: `scripts/smoke_enforce.sh`
+- Audit smoke test: `scripts/smoke_audit.sh`
 - Audit fallback smoke test: `scripts/smoke_audit_fallback.sh`
 - Environment verification: `scripts/verify_env.sh [--strict]`
 - Event schema validation: `scripts/validate_event_schema.py` + `tests/event_samples/`
@@ -52,12 +54,19 @@ deliver each requirement.
 - Dependency update automation: `.github/dependabot.yml` (GitHub Actions + Docker)
 - E2E workflow: `.github/workflows/e2e.yml`
 - Soak reliability workflow: `.github/workflows/soak.yml` + `scripts/soak_reliability.sh`
+- Staging canary workflow: `.github/workflows/canary.yml` + `scripts/canary_gate.sh`
 - Perf regression workflow: `.github/workflows/perf.yml`
 - Kernel matrix workflow: `.github/workflows/kernel-matrix.yml`
 - Nightly fuzz workflow: `.github/workflows/nightly-fuzz.yml`
+- Release drill workflow: `.github/workflows/release-drill.yml` + `scripts/release_drill.sh`
 - Upgrade/migration runbook: `docs/UPGRADE.md`
 - Key rotation/revocation runbook: `docs/KEY_MANAGEMENT.md`
+- Key rotation drill workflow: `.github/workflows/key-rotation-drill.yml` + `scripts/key_rotation_drill.sh`
+- Aggregated go-live evidence workflow: `.github/workflows/go-live-gate.yml`
 - Incident evidence collection script: `scripts/collect_incident_bundle.sh`
 - Incident drill workflow: `.github/workflows/incident-drill.yml`
 - Incident response runbook: `docs/INCIDENT_RESPONSE.md`
 - Support and deprecation policy: `docs/SUPPORT_POLICY.md`
+- Final go/no-go checklist: `docs/GO_LIVE_CHECKLIST.md`
+- Branch-protection baseline: `docs/BRANCH_PROTECTION.md` + `scripts/check_branch_protection.sh`
+- Branch-protection audit workflow: `.github/workflows/branch-protection-audit.yml`

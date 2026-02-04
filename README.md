@@ -454,6 +454,10 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening details
 |----------|-------------|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and internals |
 | [PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) | Production gates and evidence checklist |
+| [GO_LIVE_CHECKLIST.md](docs/GO_LIVE_CHECKLIST.md) | Final go/no-go checklist for release candidates |
+| [BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) | Protected-branch baseline and required checks |
+| [CANARY_RUNBOOK.md](docs/CANARY_RUNBOOK.md) | Staging canary and soak validation workflow |
+| [RELEASE_DRILL.md](docs/RELEASE_DRILL.md) | Pre-release packaging and upgrade drill |
 | [KEY_MANAGEMENT.md](docs/KEY_MANAGEMENT.md) | Policy signing key rotation and revocation runbook |
 | [SUPPORT_POLICY.md](docs/SUPPORT_POLICY.md) | Supported versions, compatibility, and deprecation guarantees |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |

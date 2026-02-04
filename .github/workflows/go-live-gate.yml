@@ -1,0 +1,192 @@
+name: Go-Live Gate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  readiness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm python3-jsonschema linux-tools-common linux-tools-$(uname -r) || sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm python3-jsonschema linux-tools-common
+
+      - name: Run release-readiness gate
+        run: |
+          mkdir -p artifacts/go-live/readiness
+          set -o pipefail
+          scripts/release_readiness.sh | tee artifacts/go-live/readiness/release_readiness.log
+
+      - name: Run key-rotation drill
+        run: |
+          mkdir -p artifacts/go-live/readiness
+          set -o pipefail
+          BUILD_DIR=build-key-drill scripts/key_rotation_drill.sh | tee artifacts/go-live/readiness/key_rotation_drill.log
+
+      - name: Upload readiness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-live-readiness
+          path: artifacts/go-live/readiness/
+          if-no-files-found: warn
+
+  runtime-canary:
+    runs-on: [self-hosted, bpf-lsm]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (if apt-get is available)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+          fi
+
+      - name: Verify environment
+        run: scripts/verify_env.sh --strict
+
+      - name: Require BPF LSM
+        run: grep -qw bpf /sys/kernel/security/lsm
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure --timeout 180
+
+      - name: Canary gate (audit)
+        run: sudo AEGIS_BIN=./build/aegisbpf PHASE=audit DURATION_SECONDS=180 MAX_RINGBUF_DROPS=100 MAX_RSS_GROWTH_KB=65536 scripts/canary_gate.sh
+
+      - name: Canary gate (enforce)
+        run: sudo AEGIS_BIN=./build/aegisbpf PHASE=enforce ENFORCE_SIGNAL=term DURATION_SECONDS=180 MAX_RINGBUF_DROPS=100 MAX_RSS_GROWTH_KB=65536 scripts/canary_gate.sh
+
+      - name: Incident evidence bundle
+        run: |
+          mkdir -p artifacts/go-live
+          sudo AEGIS_BIN=./build/aegisbpf scripts/collect_incident_bundle.sh artifacts/go-live/incident-gate
+
+      - name: Upload runtime artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-live-runtime
+          path: |
+            artifacts/canary/
+            artifacts/go-live/incident-gate.tar.gz
+          if-no-files-found: warn
+
+  perf-certification:
+    runs-on: [self-hosted, perf]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (if apt-get is available)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+          fi
+
+      - name: Verify environment
+        run: scripts/verify_env.sh --strict
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Perf microbench gate
+        run: |
+          mkdir -p artifacts/go-live/perf
+          set -o pipefail
+          sudo MAX_PCT=10 ITERATIONS=200000 FILE=/etc/hosts scripts/perf_compare.sh | tee artifacts/go-live/perf/perf_compare.log
+
+      - name: Perf workload suite gate
+        run: |
+          mkdir -p artifacts/go-live/perf
+          set -o pipefail
+          sudo BIN=./build/aegisbpf \
+            FILE=/etc/hosts \
+            OPEN_ITERATIONS=200000 \
+            READ_ITERATIONS=50000 \
+            STAT_SAMPLE=400 \
+            STAT_ITERATIONS=50 \
+            MAX_OPEN_PCT=10 \
+            MAX_READ_PCT=15 \
+            MAX_STAT_PCT=15 \
+            FORMAT=json \
+            OUT=artifacts/go-live/perf/perf_workload.json \
+            scripts/perf_workload_suite.sh | tee artifacts/go-live/perf/perf_workload.log
+
+      - name: Upload perf artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-live-perf
+          path: artifacts/go-live/perf/
+          if-no-files-found: warn
+
+  release-drill:
+    runs-on: [self-hosted, bpf-lsm]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (if apt-get is available)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm python3-jsonschema linux-tools-common linux-tools-$(uname -r) || sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm python3-jsonschema linux-tools-common
+          fi
+
+      - name: Verify environment
+        run: scripts/verify_env.sh --strict
+
+      - name: Require BPF LSM
+        run: grep -qw bpf /sys/kernel/security/lsm
+
+      - name: Run full release drill
+        run: BUILD_DIR=build-release-drill SKIP_BPF_BUILD=OFF ARTIFACT_DIR=artifacts/go-live/release-drill scripts/release_drill.sh
+
+      - name: Upload release-drill artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-live-release-drill
+          path: artifacts/go-live/release-drill/
+          if-no-files-found: warn
+
+  aggregate-evidence:
+    if: always()
+    needs: [readiness, runtime-canary, perf-certification, release-drill]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: go-live-evidence
+
+      - name: Bundle go-live evidence
+        run: |
+          mkdir -p bundle
+          find go-live-evidence -type f | sort > bundle/evidence_manifest.txt || true
+          cp -r go-live-evidence bundle/evidence
+          tar -czf go-live-evidence-${GITHUB_RUN_ID}.tar.gz -C bundle .
+
+      - name: Upload aggregated evidence bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-live-evidence-bundle
+          path: |
+            go-live-evidence-*.tar.gz
+            bundle/evidence_manifest.txt

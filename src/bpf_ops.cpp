@@ -193,7 +193,7 @@ static Result<void> verify_bpf_integrity(const std::string& obj_path)
         // No hash file found - in production this should be an error
         // For development/testing, warn and continue
         logger().log(SLOG_WARN("BPF object hash file not found, verification skipped")
-            .field("checked", std::string(kBpfObjHashPath) + ", " + kBpfObjHashInstallPath));
+                         .field("checked", std::string(kBpfObjHashPath) + ", " + kBpfObjHashInstallPath));
         return {};
     }
 
@@ -217,17 +217,17 @@ static Result<void> verify_bpf_integrity(const std::string& obj_path)
 
     if (expected_lower != actual_lower) {
         logger().log(SLOG_ERROR("BPF object integrity verification failed")
-            .field("path", obj_path)
-            .field("expected", expected_hash)
-            .field("actual", actual_hash));
+                         .field("path", obj_path)
+                         .field("expected", expected_hash)
+                         .field("actual", actual_hash));
         return Error(ErrorCode::BpfLoadFailed,
-            "BPF object integrity verification failed - file may have been tampered with",
-            "expected=" + expected_hash + " actual=" + actual_hash);
+                     "BPF object integrity verification failed - file may have been tampered with",
+                     "expected=" + expected_hash + " actual=" + actual_hash);
     }
 
     logger().log(SLOG_INFO("BPF object integrity verified")
-        .field("path", obj_path)
-        .field("hash", actual_hash));
+                     .field("path", obj_path)
+                     .field("hash", actual_hash));
     return {};
 }
 
@@ -764,7 +764,7 @@ Result<void> add_deny_path(BpfState& state, const std::string& path, DenyEntries
     bool is_symlink = (lstat(path.c_str(), &lstat_buf) == 0) && S_ISLNK(lstat_buf.st_mode);
     if (is_symlink) {
         logger().log(SLOG_INFO("Deny path is symlink, will resolve to target")
-            .field("symlink", path));
+                         .field("symlink", path));
     }
 
     // Canonicalize path - resolves symlinks, removes . and .., normalizes slashes
@@ -779,7 +779,7 @@ Result<void> add_deny_path(BpfState& state, const std::string& path, DenyEntries
     // Check length AFTER canonicalization (resolved path might be longer)
     if (resolved_str.size() >= kDenyPathMax) {
         return Error(ErrorCode::PathTooLong, "Resolved path exceeds maximum length",
-            resolved_str + " (" + std::to_string(resolved_str.size()) + " >= " + std::to_string(kDenyPathMax) + ")");
+                     resolved_str + " (" + std::to_string(resolved_str.size()) + " >= " + std::to_string(kDenyPathMax) + ")");
     }
 
     struct stat st {};
@@ -812,10 +812,10 @@ Result<void> add_deny_path(BpfState& state, const std::string& path, DenyEntries
 
     if (is_symlink) {
         logger().log(SLOG_INFO("Deny rule added for symlink target")
-            .field("original", path)
-            .field("resolved", resolved_str)
-            .field("dev", static_cast<int64_t>(id.dev))
-            .field("ino", static_cast<int64_t>(id.ino)));
+                         .field("original", path)
+                         .field("resolved", resolved_str)
+                         .field("dev", static_cast<int64_t>(id.dev))
+                         .field("ino", static_cast<int64_t>(id.ino)));
     }
 
     entries[id] = resolved_str;

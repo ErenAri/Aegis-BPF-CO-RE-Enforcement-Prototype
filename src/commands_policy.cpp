@@ -84,8 +84,10 @@ int cmd_policy_validate(const std::string& path, bool verbose)
             if (!policy.network.deny_ports.empty()) {
                 std::cout << "\nNetwork deny ports:\n";
                 for (const auto& pr : policy.network.deny_ports) {
-                    std::string proto = (pr.protocol == 6) ? "tcp" : (pr.protocol == 17) ? "udp" : "any";
-                    std::string dir = (pr.direction == 0) ? "egress" : (pr.direction == 1) ? "bind" : "both";
+                    std::string proto = (pr.protocol == 6) ? "tcp" : (pr.protocol == 17) ? "udp"
+                                                                                         : "any";
+                    std::string dir = (pr.direction == 0) ? "egress" : (pr.direction == 1) ? "bind"
+                                                                                           : "both";
                     std::cout << "  - port " << pr.port << " (" << proto << ", " << dir << ")\n";
                 }
             }

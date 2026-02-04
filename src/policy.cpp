@@ -66,7 +66,8 @@ static bool parse_port_rule(const std::string& str, PortRule& rule)
         if (c == ':') {
             parts.push_back(current);
             current.clear();
-        } else {
+        }
+        else {
             current += c;
         }
     }
@@ -85,11 +86,14 @@ static bool parse_port_rule(const std::string& str, PortRule& rule)
     if (parts.size() > 1 && !parts[1].empty()) {
         if (parts[1] == "tcp") {
             rule.protocol = 6;
-        } else if (parts[1] == "udp") {
+        }
+        else if (parts[1] == "udp") {
             rule.protocol = 17;
-        } else if (parts[1] == "any") {
+        }
+        else if (parts[1] == "any") {
             rule.protocol = 0;
-        } else {
+        }
+        else {
             return false;
         }
     }
@@ -97,11 +101,14 @@ static bool parse_port_rule(const std::string& str, PortRule& rule)
     if (parts.size() > 2 && !parts[2].empty()) {
         if (parts[2] == "egress" || parts[2] == "connect") {
             rule.direction = 0;
-        } else if (parts[2] == "bind") {
+        }
+        else if (parts[2] == "bind") {
             rule.direction = 1;
-        } else if (parts[2] == "both") {
+        }
+        else if (parts[2] == "both") {
             rule.direction = 2;
-        } else {
+        }
+        else {
             return false;
         }
     }
@@ -132,8 +139,7 @@ Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues)
     // Valid sections
     static const std::unordered_set<std::string> valid_sections = {
         "deny_path", "deny_inode", "allow_cgroup",
-        "deny_ip", "deny_cidr", "deny_port"
-    };
+        "deny_ip", "deny_cidr", "deny_port"};
 
     while (std::getline(in, line)) {
         ++line_no;
@@ -442,30 +448,30 @@ Result<void> apply_policy_internal_impl_fn(const std::string& path, const std::s
             auto result = add_deny_ip(state, ip);
             if (!result) {
                 logger().log(SLOG_WARN("Failed to add deny IP")
-                    .field("ip", ip)
-                    .field("error", result.error().message()));
+                                 .field("ip", ip)
+                                 .field("error", result.error().message()));
             }
         }
         for (const auto& cidr : policy.network.deny_cidrs) {
             auto result = add_deny_cidr(state, cidr);
             if (!result) {
                 logger().log(SLOG_WARN("Failed to add deny CIDR")
-                    .field("cidr", cidr)
-                    .field("error", result.error().message()));
+                                 .field("cidr", cidr)
+                                 .field("error", result.error().message()));
             }
         }
         for (const auto& port_rule : policy.network.deny_ports) {
             auto result = add_deny_port(state, port_rule.port, port_rule.protocol, port_rule.direction);
             if (!result) {
                 logger().log(SLOG_WARN("Failed to add deny port")
-                    .field("port", static_cast<int64_t>(port_rule.port))
-                    .field("error", result.error().message()));
+                                 .field("port", static_cast<int64_t>(port_rule.port))
+                                 .field("error", result.error().message()));
             }
         }
         logger().log(SLOG_INFO("Network policy applied")
-            .field("deny_ips", static_cast<int64_t>(policy.network.deny_ips.size()))
-            .field("deny_cidrs", static_cast<int64_t>(policy.network.deny_cidrs.size()))
-            .field("deny_ports", static_cast<int64_t>(policy.network.deny_ports.size())));
+                         .field("deny_ips", static_cast<int64_t>(policy.network.deny_ips.size()))
+                         .field("deny_cidrs", static_cast<int64_t>(policy.network.deny_cidrs.size()))
+                         .field("deny_ports", static_cast<int64_t>(policy.network.deny_ports.size())));
     }
 
     auto write_result = write_deny_db(entries);

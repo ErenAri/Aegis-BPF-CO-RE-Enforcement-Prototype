@@ -487,7 +487,7 @@ int cmd_health(bool json_output)
             network_pins_ok = false;
             if (json_output) {
                 emit_json(false, std::string("Network pinned map check failed: ") + pin_path + " (" +
-                                 pin_result.error().to_string() + ")");
+                                     pin_result.error().to_string() + ")");
             }
             else {
                 logger().log(SLOG_ERROR("Network pinned map check failed")

@@ -1,0 +1,25 @@
+name: Branch Protection Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1"
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit branch protection required checks
+        env:
+          BRANCH_PROTECTION_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [[ -z "${BRANCH_PROTECTION_TOKEN}" ]]; then
+            echo "BRANCH_PROTECTION_TOKEN is not configured; skipping audit."
+            echo "Set an admin-capable token in repository secrets to enable this check."
+            exit 0
+          fi
+          export GH_TOKEN="${BRANCH_PROTECTION_TOKEN}"
+          REPO="${REPO}" BRANCH=main scripts/check_branch_protection.sh

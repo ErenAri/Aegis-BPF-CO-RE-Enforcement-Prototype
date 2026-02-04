@@ -1,0 +1,44 @@
+name: Staging Canary
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+
+jobs:
+  canary:
+    runs-on: [self-hosted, bpf-lsm]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (if apt-get is available)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+          fi
+
+      - name: Verify environment
+        run: scripts/verify_env.sh --strict
+
+      - name: Require BPF LSM
+        run: grep -qw bpf /sys/kernel/security/lsm
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Canary gate (audit)
+        run: sudo AEGIS_BIN=./build/aegisbpf PHASE=audit DURATION_SECONDS=300 MAX_RINGBUF_DROPS=100 MAX_RSS_GROWTH_KB=65536 scripts/canary_gate.sh
+
+      - name: Canary gate (enforce)
+        run: sudo AEGIS_BIN=./build/aegisbpf PHASE=enforce ENFORCE_SIGNAL=term DURATION_SECONDS=300 MAX_RINGBUF_DROPS=100 MAX_RSS_GROWTH_KB=65536 scripts/canary_gate.sh
+
+      - name: Upload canary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-artifacts
+          path: artifacts/canary/

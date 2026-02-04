@@ -28,6 +28,24 @@ MAX_PCT=10 ITERATIONS=200000 FILE=/etc/hosts sudo scripts/perf_compare.sh
 
 CI note: `.github/workflows/perf.yml` runs this check on a labeled self-hosted runner.
 
+## Real workload suite
+
+Run a broader file workload suite (open/close + full-read + stat-walk):
+
+```
+sudo BIN=./build/aegisbpf \
+  OPEN_ITERATIONS=200000 \
+  READ_ITERATIONS=50000 \
+  STAT_SAMPLE=400 \
+  STAT_ITERATIONS=50 \
+  MAX_OPEN_PCT=10 \
+  MAX_READ_PCT=15 \
+  MAX_STAT_PCT=15 \
+  scripts/perf_workload_suite.sh
+```
+
+The script exits non-zero when any workload exceeds its overhead threshold.
+
 ## JSON output
 
 Use `FORMAT=json` and optionally `OUT=/path`:

@@ -118,7 +118,8 @@ void journal_send_net_block(const NetBlockEvent& ev, const std::string& payload,
                             const std::string& event_type, const std::string& remote_ip)
 {
     int priority = LOG_WARNING;  // Network blocks are warnings by default
-    std::string protocol = (ev.protocol == 6) ? "tcp" : (ev.protocol == 17) ? "udp" : std::to_string(ev.protocol);
+    std::string protocol = (ev.protocol == 6) ? "tcp" : (ev.protocol == 17) ? "udp"
+                                                                            : std::to_string(ev.protocol);
     std::string family = (ev.family == 2) ? "ipv4" : "ipv6";
     std::string direction = (ev.direction == 0) ? "egress" : "bind";
     std::string rule_type = to_string(ev.rule_type, sizeof(ev.rule_type));

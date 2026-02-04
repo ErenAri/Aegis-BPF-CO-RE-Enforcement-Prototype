@@ -1,0 +1,36 @@
+name: Release Drill
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 1 * *"
+
+jobs:
+  release-drill:
+    runs-on: [self-hosted, bpf-lsm]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (if apt-get is available)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm python3-jsonschema linux-tools-common linux-tools-$(uname -r) || sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build rpm python3-jsonschema linux-tools-common
+          fi
+
+      - name: Verify environment
+        run: scripts/verify_env.sh --strict
+
+      - name: Require BPF LSM
+        run: grep -qw bpf /sys/kernel/security/lsm
+
+      - name: Run release drill
+        run: BUILD_DIR=build-release-drill SKIP_BPF_BUILD=OFF ARTIFACT_DIR=artifacts/release-drill scripts/release_drill.sh
+
+      - name: Upload release drill artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-drill-artifacts
+          path: artifacts/release-drill/

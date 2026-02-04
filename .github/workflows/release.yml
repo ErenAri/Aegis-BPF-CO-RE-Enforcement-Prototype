@@ -12,7 +12,42 @@ permissions:
   attestations: write
 
 jobs:
+  e2e-gate:
+    runs-on: [self-hosted, bpf-lsm]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (if apt-get is available)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+          fi
+
+      - name: Verify environment
+        run: scripts/verify_env.sh --strict
+
+      - name: Require BPF LSM
+        run: grep -qw bpf /sys/kernel/security/lsm
+
+      - name: Configure
+        run: cmake -S . -B build-e2e -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build-e2e
+
+      - name: Unit tests
+        run: ctest --test-dir build-e2e --output-on-failure --timeout 120
+
+      - name: Enforce smoke test
+        run: sudo BIN=./build-e2e/aegisbpf ENFORCE_SIGNAL=term scripts/smoke_enforce.sh
+
+      - name: Short soak reliability
+        run: sudo AEGIS_BIN=./build-e2e/aegisbpf DURATION_SECONDS=180 MAX_RINGBUF_DROPS=100 MAX_RSS_GROWTH_KB=65536 scripts/soak_reliability.sh
+
   build-release:
+    needs: [e2e-gate]
     strategy:
       fail-fast: false
       matrix:

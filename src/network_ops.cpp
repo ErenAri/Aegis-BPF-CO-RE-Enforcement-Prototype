@@ -486,8 +486,7 @@ Result<void> add_deny_cidr_v4(BpfState& state, const std::string& cidr)
 
     Ipv4LpmKey key = {
         .prefixlen = prefix_len,
-        .addr = ip_be
-    };
+        .addr = ip_be};
 
     uint8_t one = 1;
     if (bpf_map_update_elem(bpf_map__fd(state.deny_cidr_v4), &key, &one, BPF_ANY)) {
@@ -510,8 +509,7 @@ Result<void> del_deny_cidr_v4(BpfState& state, const std::string& cidr)
 
     Ipv4LpmKey key = {
         .prefixlen = prefix_len,
-        .addr = ip_be
-    };
+        .addr = ip_be};
 
     if (bpf_map_delete_elem(bpf_map__fd(state.deny_cidr_v4), &key)) {
         if (errno == ENOENT) {
@@ -556,8 +554,7 @@ Result<void> add_deny_cidr_v6(BpfState& state, const std::string& cidr)
 
     Ipv6LpmKey key = {
         .prefixlen = prefix_len,
-        .addr = {0}
-    };
+        .addr = {0}};
     std::memcpy(key.addr, ip.addr, sizeof(key.addr));
 
     uint8_t one = 1;
@@ -581,8 +578,7 @@ Result<void> del_deny_cidr_v6(BpfState& state, const std::string& cidr)
 
     Ipv6LpmKey key = {
         .prefixlen = prefix_len,
-        .addr = {0}
-    };
+        .addr = {0}};
     std::memcpy(key.addr, ip.addr, sizeof(key.addr));
 
     if (bpf_map_delete_elem(bpf_map__fd(state.deny_cidr_v6), &key)) {
@@ -655,8 +651,7 @@ Result<void> add_deny_port(BpfState& state, uint16_t port, uint8_t protocol, uin
     PortKey key = {
         .port = port,
         .protocol = protocol,
-        .direction = direction
-    };
+        .direction = direction};
 
     uint8_t one = 1;
     if (bpf_map_update_elem(bpf_map__fd(state.deny_port), &key, &one, BPF_ANY)) {
@@ -674,8 +669,7 @@ Result<void> del_deny_port(BpfState& state, uint16_t port, uint8_t protocol, uin
     PortKey key = {
         .port = port,
         .protocol = protocol,
-        .direction = direction
-    };
+        .direction = direction};
 
     if (bpf_map_delete_elem(bpf_map__fd(state.deny_port), &key)) {
         if (errno == ENOENT) {

@@ -576,8 +576,8 @@ Result<void> validate_config_directory_permissions(const std::string& path)
     // Must be owned by root (uid 0)
     if (st.st_uid != 0) {
         return Error(ErrorCode::PermissionDenied,
-            "Config directory must be owned by root",
-            path + " (owner uid=" + std::to_string(st.st_uid) + ")");
+                     "Config directory must be owned by root",
+                     path + " (owner uid=" + std::to_string(st.st_uid) + ")");
     }
 
     // Check permissions: must not be world-writable (no 'other' write bit)
@@ -585,8 +585,8 @@ Result<void> validate_config_directory_permissions(const std::string& path)
     mode_t mode = st.st_mode & 0777;
     if (mode & S_IWOTH) {
         return Error(ErrorCode::PermissionDenied,
-            "Config directory must not be world-writable",
-            path + " (mode=" + std::to_string(mode) + ")");
+                     "Config directory must not be world-writable",
+                     path + " (mode=" + std::to_string(mode) + ")");
     }
 
     // Warn if group-writable but not fail (some setups may need this)
@@ -616,16 +616,16 @@ Result<void> validate_file_permissions(const std::string& path, bool require_roo
     // Must be owned by root if required
     if (require_root_owner && st.st_uid != 0) {
         return Error(ErrorCode::PermissionDenied,
-            "File must be owned by root",
-            path + " (owner uid=" + std::to_string(st.st_uid) + ")");
+                     "File must be owned by root",
+                     path + " (owner uid=" + std::to_string(st.st_uid) + ")");
     }
 
     // Check permissions: must not be world-writable
     mode_t mode = st.st_mode & 0777;
     if (mode & S_IWOTH) {
         return Error(ErrorCode::PermissionDenied,
-            "File must not be world-writable",
-            path + " (mode=" + std::to_string(mode) + ")");
+                     "File must not be world-writable",
+                     path + " (mode=" + std::to_string(mode) + ")");
     }
 
     // Warn if group-writable (but don't fail)
