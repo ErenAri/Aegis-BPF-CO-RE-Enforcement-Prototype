@@ -257,8 +257,10 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
 
     // Network maps (optional)
     state.deny_ipv4 = bpf_object__find_map_by_name(state.obj, "deny_ipv4");
+    state.deny_ipv6 = bpf_object__find_map_by_name(state.obj, "deny_ipv6");
     state.deny_port = bpf_object__find_map_by_name(state.obj, "deny_port");
     state.deny_cidr_v4 = bpf_object__find_map_by_name(state.obj, "deny_cidr_v4");
+    state.deny_cidr_v6 = bpf_object__find_map_by_name(state.obj, "deny_cidr_v6");
     state.net_block_stats = bpf_object__find_map_by_name(state.obj, "net_block_stats");
     state.net_ip_stats = bpf_object__find_map_by_name(state.obj, "net_ip_stats");
     state.net_port_stats = bpf_object__find_map_by_name(state.obj, "net_port_stats");
@@ -289,6 +291,28 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
             }
             return {};
         };
+        auto try_reuse_optional = [](bpf_map* map, const char* path, bool& reused) -> Result<void> {
+            if (!map) {
+                return {};
+            }
+            auto result = reuse_pinned_map(map, path, reused);
+            if (result) {
+                return {};
+            }
+
+            logger().log(SLOG_WARN("Failed to reuse optional pinned map; recreating map")
+                             .field("path", path)
+                             .field("error", result.error().to_string()));
+            reused = false;
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+            if (ec) {
+                logger().log(SLOG_WARN("Failed to remove stale optional pinned map")
+                                 .field("path", path)
+                                 .field("error", ec.message()));
+            }
+            return {};
+        };
 
         TRY(try_reuse(state.deny_inode, kDenyInodePin, state.inode_reused));
         TRY(try_reuse(state.deny_path, kDenyPathPin, state.deny_path_reused));
@@ -301,24 +325,14 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
         TRY(try_reuse(state.survival_allowlist, kSurvivalAllowlistPin, state.survival_allowlist_reused));
 
         // Network maps (optional - don't fail if not found)
-        if (state.deny_ipv4) {
-            TRY(try_reuse(state.deny_ipv4, kDenyIpv4Pin, state.deny_ipv4_reused));
-        }
-        if (state.deny_port) {
-            TRY(try_reuse(state.deny_port, kDenyPortPin, state.deny_port_reused));
-        }
-        if (state.deny_cidr_v4) {
-            TRY(try_reuse(state.deny_cidr_v4, kDenyCidrV4Pin, state.deny_cidr_v4_reused));
-        }
-        if (state.net_block_stats) {
-            TRY(try_reuse(state.net_block_stats, kNetBlockStatsPin, state.net_block_stats_reused));
-        }
-        if (state.net_ip_stats) {
-            TRY(try_reuse(state.net_ip_stats, kNetIpStatsPin, state.net_ip_stats_reused));
-        }
-        if (state.net_port_stats) {
-            TRY(try_reuse(state.net_port_stats, kNetPortStatsPin, state.net_port_stats_reused));
-        }
+        TRY(try_reuse_optional(state.deny_ipv4, kDenyIpv4Pin, state.deny_ipv4_reused));
+        TRY(try_reuse_optional(state.deny_ipv6, kDenyIpv6Pin, state.deny_ipv6_reused));
+        TRY(try_reuse_optional(state.deny_port, kDenyPortPin, state.deny_port_reused));
+        TRY(try_reuse_optional(state.deny_cidr_v4, kDenyCidrV4Pin, state.deny_cidr_v4_reused));
+        TRY(try_reuse_optional(state.deny_cidr_v6, kDenyCidrV6Pin, state.deny_cidr_v6_reused));
+        TRY(try_reuse_optional(state.net_block_stats, kNetBlockStatsPin, state.net_block_stats_reused));
+        TRY(try_reuse_optional(state.net_ip_stats, kNetIpStatsPin, state.net_ip_stats_reused));
+        TRY(try_reuse_optional(state.net_port_stats, kNetPortStatsPin, state.net_port_stats_reused));
     }
 
     if (!kernel_bpf_lsm_enabled()) {
@@ -352,8 +366,10 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
                      !state.deny_inode_stats_reused || !state.deny_path_stats_reused ||
                      !state.agent_meta_reused || !state.survival_allowlist_reused ||
                      (state.deny_ipv4 && !state.deny_ipv4_reused) ||
+                     (state.deny_ipv6 && !state.deny_ipv6_reused) ||
                      (state.deny_port && !state.deny_port_reused) ||
                      (state.deny_cidr_v4 && !state.deny_cidr_v4_reused) ||
+                     (state.deny_cidr_v6 && !state.deny_cidr_v6_reused) ||
                      (state.net_block_stats && !state.net_block_stats_reused) ||
                      (state.net_ip_stats && !state.net_ip_stats_reused) ||
                      (state.net_port_stats && !state.net_port_stats_reused);
@@ -390,11 +406,17 @@ Result<void> load_bpf(bool reuse_pins, bool attach_links, BpfState& state)
         if (state.deny_ipv4) {
             TRY(try_pin(state.deny_ipv4, kDenyIpv4Pin, state.deny_ipv4_reused));
         }
+        if (state.deny_ipv6) {
+            TRY(try_pin(state.deny_ipv6, kDenyIpv6Pin, state.deny_ipv6_reused));
+        }
         if (state.deny_port) {
             TRY(try_pin(state.deny_port, kDenyPortPin, state.deny_port_reused));
         }
         if (state.deny_cidr_v4) {
             TRY(try_pin(state.deny_cidr_v4, kDenyCidrV4Pin, state.deny_cidr_v4_reused));
+        }
+        if (state.deny_cidr_v6) {
+            TRY(try_pin(state.deny_cidr_v6, kDenyCidrV6Pin, state.deny_cidr_v6_reused));
         }
         if (state.net_block_stats) {
             TRY(try_pin(state.net_block_stats, kNetBlockStatsPin, state.net_block_stats_reused));
@@ -668,6 +690,7 @@ Result<void> set_agent_config(BpfState& state, bool audit_only)
     uint32_t key = 0;
     AgentConfig cfg{};
     cfg.audit_only = audit_only ? 1 : 0;
+    cfg.enforce_signal = kEnforceSignalTerm;
     if (bpf_map_update_elem(bpf_map__fd(state.config_map), &key, &cfg, BPF_ANY)) {
         return Error::system(errno, "Failed to configure BPF audit mode");
     }

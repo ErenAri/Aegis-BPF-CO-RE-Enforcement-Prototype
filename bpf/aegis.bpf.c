@@ -13,7 +13,21 @@
 #include <bpf/bpf_tracing.h>
 #include <asm-generic/errno-base.h>
 
+#ifndef SIGINT
+#define SIGINT 2
+#endif
+#ifndef SIGKILL
 #define SIGKILL 9
+#endif
+#ifndef SIGTERM
+#define SIGTERM 15
+#endif
+#ifndef AF_INET
+#define AF_INET 2
+#endif
+#ifndef AF_INET6
+#define AF_INET6 10
+#endif
 #define DENY_PATH_MAX 256
 #ifndef MAY_EXEC
 #define MAY_EXEC 0x01
@@ -75,7 +89,7 @@ struct net_block_event {
     __u8 _pad;
     __be32 remote_ipv4;
     __u8 remote_ipv6[16];
-    char action[8];     /* "AUDIT" or "KILL" */
+    char action[8];     /* "AUDIT", "TERM", "KILL", or "BLOCK" */
     char rule_type[16]; /* "ip", "port", "cidr" */
 };
 
@@ -102,7 +116,7 @@ struct agent_config {
     __u8 audit_only;
     __u8 deadman_enabled;
     __u8 break_glass_active;
-    __u8 _pad;
+    __u8 enforce_signal;  /* 0=none, 2=SIGINT, 9=SIGKILL, 15=SIGTERM */
     __u64 deadman_deadline_ns;  /* ktime_get_boot_ns() deadline */
     __u32 deadman_ttl_seconds;
     __u32 event_sample_rate;
@@ -231,6 +245,18 @@ struct {
     __type(value, __u8);
 } deny_ipv4 SEC(".maps");
 
+/* IPv6 deny list - exact match */
+struct ipv6_key {
+    __u8 addr[16];
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct ipv6_key);
+    __type(value, __u8);
+} deny_ipv6 SEC(".maps");
+
 /* Port deny key structure */
 struct port_key {
     __u16 port;
@@ -260,6 +286,19 @@ struct {
     __type(value, __u8);
 } deny_cidr_v4 SEC(".maps");
 
+struct ipv6_lpm_key {
+    __u32 prefixlen;
+    __u8 addr[16];
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 16384);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct ipv6_lpm_key);
+    __type(value, __u8);
+} deny_cidr_v6 SEC(".maps");
+
 /* Network block statistics */
 struct net_stats_entry {
     __u64 connect_blocks;
@@ -275,10 +314,16 @@ struct {
 } net_block_stats SEC(".maps");
 
 /* Per-IP block statistics */
+struct net_ip_key {
+    __u8 family;  /* AF_INET=2, AF_INET6=10 */
+    __u8 _pad[3];
+    __u8 addr[16];
+};
+
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
     __uint(max_entries, 16384);
-    __type(key, __be32);
+    __type(key, struct net_ip_key);
     __type(value, __u64);
 } net_ip_stats SEC(".maps");
 
@@ -403,6 +448,47 @@ static __always_inline __u8 get_effective_audit_mode(void)
     return 0;  /* Enforce mode */
 }
 
+static __always_inline __u8 get_effective_enforce_signal(void)
+{
+    __u32 zero = 0;
+    struct agent_config *cfg = bpf_map_lookup_elem(&agent_config_map, &zero);
+    if (!cfg)
+        return SIGTERM;  /* Safe default in enforce mode */
+
+    if (cfg->enforce_signal == 0 || cfg->enforce_signal == SIGINT ||
+        cfg->enforce_signal == SIGKILL || cfg->enforce_signal == SIGTERM)
+        return cfg->enforce_signal;
+
+    return SIGTERM;
+}
+
+static __always_inline void maybe_send_enforce_signal(__u8 signal)
+{
+    if (signal != 0)
+        bpf_send_signal(signal);
+}
+
+static __always_inline void set_action_string(char action[8], __u8 audit, __u8 signal)
+{
+    if (audit) {
+        __builtin_memcpy(action, "AUDIT", sizeof("AUDIT"));
+        return;
+    }
+    if (signal == SIGKILL) {
+        __builtin_memcpy(action, "KILL", sizeof("KILL"));
+        return;
+    }
+    if (signal == SIGTERM) {
+        __builtin_memcpy(action, "TERM", sizeof("TERM"));
+        return;
+    }
+    if (signal == SIGINT) {
+        __builtin_memcpy(action, "INT", sizeof("INT"));
+        return;
+    }
+    __builtin_memcpy(action, "BLOCK", sizeof("BLOCK"));
+}
+
 static __always_inline __u32 get_event_sample_rate(void)
 {
     __u32 zero = 0;
@@ -452,13 +538,39 @@ static __always_inline void increment_net_ringbuf_drops(void)
         __sync_fetch_and_add(&stats->ringbuf_drops, 1);
 }
 
-static __always_inline void increment_net_ip_stat(__be32 ip)
+static __always_inline void increment_net_ip_stat_v4(__be32 ip)
 {
+    struct net_ip_key key = {
+        .family = AF_INET,
+        ._pad = {0, 0, 0},
+        .addr = {0},
+    };
+    __builtin_memcpy(key.addr, &ip, sizeof(ip));
+
     __u64 zero64 = 0;
-    __u64 *ip_stat = bpf_map_lookup_elem(&net_ip_stats, &ip);
+    __u64 *ip_stat = bpf_map_lookup_elem(&net_ip_stats, &key);
     if (!ip_stat) {
-        bpf_map_update_elem(&net_ip_stats, &ip, &zero64, BPF_NOEXIST);
-        ip_stat = bpf_map_lookup_elem(&net_ip_stats, &ip);
+        bpf_map_update_elem(&net_ip_stats, &key, &zero64, BPF_NOEXIST);
+        ip_stat = bpf_map_lookup_elem(&net_ip_stats, &key);
+    }
+    if (ip_stat)
+        __sync_fetch_and_add(ip_stat, 1);
+}
+
+static __always_inline void increment_net_ip_stat_v6(const struct ipv6_key *ip)
+{
+    struct net_ip_key key = {
+        .family = AF_INET6,
+        ._pad = {0, 0, 0},
+        .addr = {0},
+    };
+    __builtin_memcpy(key.addr, ip->addr, sizeof(key.addr));
+
+    __u64 zero64 = 0;
+    __u64 *ip_stat = bpf_map_lookup_elem(&net_ip_stats, &key);
+    if (!ip_stat) {
+        bpf_map_update_elem(&net_ip_stats, &key, &zero64, BPF_NOEXIST);
+        ip_stat = bpf_map_lookup_elem(&net_ip_stats, &key);
     }
     if (ip_stat)
         __sync_fetch_and_add(ip_stat, 1);
@@ -490,6 +602,30 @@ static __always_inline void fill_net_block_event_process_info(
         ev->start_time = pi->start_time;
         ev->parent_start_time = pi->parent_start_time;
     }
+}
+
+static __always_inline int port_rule_matches(__u16 port, __u8 protocol, __u8 direction)
+{
+    struct port_key key = {
+        .port = port,
+        .protocol = protocol,
+        .direction = direction,
+    };
+
+    if (bpf_map_lookup_elem(&deny_port, &key))
+        return 1;
+
+    key.protocol = 0;  /* any protocol */
+    if (bpf_map_lookup_elem(&deny_port, &key))
+        return 1;
+
+    key.direction = 2; /* both directions */
+    key.protocol = protocol;
+    if (bpf_map_lookup_elem(&deny_port, &key))
+        return 1;
+
+    key.protocol = 0;  /* both + any protocol */
+    return bpf_map_lookup_elem(&deny_port, &key) != NULL;
 }
 
 /* ============================================================================
@@ -569,6 +705,7 @@ int BPF_PROG(handle_file_open, struct file *file)
         return 0;
 
     __u8 audit = get_effective_audit_mode();
+    __u8 enforce_signal = get_effective_enforce_signal();
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
@@ -578,9 +715,9 @@ int BPF_PROG(handle_file_open, struct file *file)
     increment_cgroup_stat(cgid);
     increment_inode_stat(&key);
 
-    /* Send SIGKILL in enforce mode */
+    /* Optional signal in enforce mode (always deny with -EPERM). */
     if (!audit)
-        bpf_send_signal(SIGKILL);
+        maybe_send_enforce_signal(enforce_signal);
 
     /* Send block event */
     if (!should_emit_event(sample_rate))
@@ -594,10 +731,7 @@ int BPF_PROG(handle_file_open, struct file *file)
         e->block.ino = key.ino;
         e->block.dev = key.dev;
         __builtin_memset(e->block.path, 0, sizeof(e->block.path));
-        if (audit)
-            __builtin_memcpy(e->block.action, "AUDIT", sizeof("AUDIT"));
-        else
-            __builtin_memcpy(e->block.action, "KILL", sizeof("KILL"));
+        set_action_string(e->block.action, audit, enforce_signal);
         bpf_ringbuf_submit(e, 0);
     } else {
         increment_ringbuf_drops();
@@ -630,6 +764,7 @@ static __always_inline int handle_inode_permission_impl(struct inode *inode, int
         return 0;
 
     __u8 audit = get_effective_audit_mode();
+    __u8 enforce_signal = get_effective_enforce_signal();
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
@@ -639,9 +774,9 @@ static __always_inline int handle_inode_permission_impl(struct inode *inode, int
     increment_cgroup_stat(cgid);
     increment_inode_stat(&key);
 
-    /* Send SIGKILL in enforce mode */
+    /* Optional signal in enforce mode (always deny with -EPERM). */
     if (!audit)
-        bpf_send_signal(SIGKILL);
+        maybe_send_enforce_signal(enforce_signal);
 
     /* Send block event */
     if (!should_emit_event(sample_rate))
@@ -655,10 +790,7 @@ static __always_inline int handle_inode_permission_impl(struct inode *inode, int
         e->block.ino = key.ino;
         e->block.dev = key.dev;
         __builtin_memset(e->block.path, 0, sizeof(e->block.path));
-        if (audit)
-            __builtin_memcpy(e->block.action, "AUDIT", sizeof("AUDIT"));
-        else
-            __builtin_memcpy(e->block.action, "KILL", sizeof("KILL"));
+        set_action_string(e->block.action, audit, enforce_signal);
         bpf_ringbuf_submit(e, 0);
     } else {
         increment_ringbuf_drops();
@@ -761,11 +893,11 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
 {
     if (!sock || !address)
         return 0;
+    (void)addrlen;
 
     __u16 family = BPF_CORE_READ(address, sa_family);
 
-    /* Only handle IPv4 for now */
-    if (family != 2)  /* AF_INET = 2 */
+    if (family != AF_INET && family != AF_INET6)
         return 0;
 
     __u64 cgid = bpf_get_current_cgroup_id();
@@ -774,11 +906,21 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
     if (is_cgroup_allowed(cgid))
         return 0;
 
-    /* Extract IPv4 address and port */
-    struct sockaddr_in *sin = (struct sockaddr_in *)address;
-    __be32 remote_ip = BPF_CORE_READ(sin, sin_addr.s_addr);
-    __u16 remote_port_be = BPF_CORE_READ(sin, sin_port);
-    __u16 remote_port = bpf_ntohs(remote_port_be);
+    __be32 remote_ip_v4 = 0;
+    struct ipv6_key remote_ip_v6 = {};
+    __u16 remote_port = 0;
+    if (family == AF_INET) {
+        struct sockaddr_in *sin = (struct sockaddr_in *)address;
+        remote_ip_v4 = BPF_CORE_READ(sin, sin_addr.s_addr);
+        __u16 remote_port_be = BPF_CORE_READ(sin, sin_port);
+        remote_port = bpf_ntohs(remote_port_be);
+    } else {
+        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)address;
+        __u16 remote_port_be = BPF_CORE_READ(sin6, sin6_port);
+        remote_port = bpf_ntohs(remote_port_be);
+        if (bpf_probe_read_kernel(remote_ip_v6.addr, sizeof(remote_ip_v6.addr), &sin6->sin6_addr))
+            return 0;
+    }
 
     /* Get socket protocol */
     struct sock *sk = BPF_CORE_READ(sock, sk);
@@ -787,54 +929,55 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
     int matched = 0;
     char rule_type[16] = {};
 
-    /* Check 1: Exact IP match */
-    if (bpf_map_lookup_elem(&deny_ipv4, &remote_ip)) {
-        matched = 1;
-        __builtin_memcpy(rule_type, "ip", 3);
-        increment_net_ip_stat(remote_ip);
-    }
-
-    /* Check 2: CIDR match via LPM trie */
-    if (!matched) {
-        struct ipv4_lpm_key lpm_key = {
-            .prefixlen = 32,
-            .addr = remote_ip
-        };
-        if (bpf_map_lookup_elem(&deny_cidr_v4, &lpm_key)) {
+    if (family == AF_INET) {
+        /* Check 1: Exact IPv4 match */
+        if (bpf_map_lookup_elem(&deny_ipv4, &remote_ip_v4)) {
             matched = 1;
-            __builtin_memcpy(rule_type, "cidr", 5);
-            increment_net_ip_stat(remote_ip);
+            __builtin_memcpy(rule_type, "ip", 3);
+            increment_net_ip_stat_v4(remote_ip_v4);
+        }
+
+        /* Check 2: IPv4 CIDR match via LPM trie */
+        if (!matched) {
+            struct ipv4_lpm_key lpm_key = {
+                .prefixlen = 32,
+                .addr = remote_ip_v4,
+            };
+            if (bpf_map_lookup_elem(&deny_cidr_v4, &lpm_key)) {
+                matched = 1;
+                __builtin_memcpy(rule_type, "cidr", 5);
+                increment_net_ip_stat_v4(remote_ip_v4);
+            }
+        }
+    } else {
+        /* Check 1: Exact IPv6 match */
+        if (bpf_map_lookup_elem(&deny_ipv6, &remote_ip_v6)) {
+            matched = 1;
+            __builtin_memcpy(rule_type, "ip", 3);
+            increment_net_ip_stat_v6(&remote_ip_v6);
+        }
+
+        /* Check 2: IPv6 CIDR match via LPM trie */
+        if (!matched) {
+            struct ipv6_lpm_key lpm_key = {
+                .prefixlen = 128,
+                .addr = {0},
+            };
+            __builtin_memcpy(lpm_key.addr, remote_ip_v6.addr, sizeof(lpm_key.addr));
+            if (bpf_map_lookup_elem(&deny_cidr_v6, &lpm_key)) {
+                matched = 1;
+                __builtin_memcpy(rule_type, "cidr", 5);
+                increment_net_ip_stat_v6(&remote_ip_v6);
+            }
         }
     }
 
-    /* Check 3: Port match (try specific protocol first, then any) */
+    /* Check 3: Port match (protocol/direction aware) */
     if (!matched) {
-        struct port_key pk = {
-            .port = remote_port,
-            .protocol = protocol,
-            .direction = 0  /* egress */
-        };
-        if (bpf_map_lookup_elem(&deny_port, &pk)) {
+        if (port_rule_matches(remote_port, protocol, 0)) {
             matched = 1;
             __builtin_memcpy(rule_type, "port", 5);
             increment_net_port_stat(remote_port);
-        } else {
-            /* Try with protocol=any */
-            pk.protocol = 0;
-            if (bpf_map_lookup_elem(&deny_port, &pk)) {
-                matched = 1;
-                __builtin_memcpy(rule_type, "port", 5);
-                increment_net_port_stat(remote_port);
-            } else {
-                /* Try with direction=both */
-                pk.direction = 2;
-                pk.protocol = protocol;
-                if (bpf_map_lookup_elem(&deny_port, &pk)) {
-                    matched = 1;
-                    __builtin_memcpy(rule_type, "port", 5);
-                    increment_net_port_stat(remote_port);
-                }
-            }
         }
     }
 
@@ -843,6 +986,7 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
 
     /* Rule matched - process denial */
     __u8 audit = get_effective_audit_mode();
+    __u8 enforce_signal = get_effective_enforce_signal();
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
@@ -851,9 +995,9 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
     increment_net_connect_stats();
     increment_cgroup_stat(cgid);
 
-    /* Send SIGKILL in enforce mode */
+    /* Optional signal in enforce mode (always deny with -EPERM). */
     if (!audit)
-        bpf_send_signal(SIGKILL);
+        maybe_send_enforce_signal(enforce_signal);
 
     /* Emit event */
     if (!should_emit_event(sample_rate))
@@ -870,12 +1014,12 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
         e->net_block.local_port = 0;
         e->net_block.remote_port = remote_port;
         e->net_block.direction = 0;  /* egress */
-        e->net_block.remote_ipv4 = remote_ip;
-        __builtin_memset(e->net_block.remote_ipv6, 0, sizeof(e->net_block.remote_ipv6));
-        if (audit)
-            __builtin_memcpy(e->net_block.action, "AUDIT", sizeof("AUDIT"));
+        e->net_block.remote_ipv4 = (family == AF_INET) ? remote_ip_v4 : 0;
+        if (family == AF_INET6)
+            __builtin_memcpy(e->net_block.remote_ipv6, remote_ip_v6.addr, sizeof(e->net_block.remote_ipv6));
         else
-            __builtin_memcpy(e->net_block.action, "KILL", sizeof("KILL"));
+            __builtin_memset(e->net_block.remote_ipv6, 0, sizeof(e->net_block.remote_ipv6));
+        set_action_string(e->net_block.action, audit, enforce_signal);
         __builtin_memcpy(e->net_block.rule_type, rule_type, sizeof(rule_type));
         bpf_ringbuf_submit(e, 0);
     } else {
@@ -891,11 +1035,11 @@ int BPF_PROG(handle_socket_bind, struct socket *sock,
 {
     if (!sock || !address)
         return 0;
+    (void)addrlen;
 
     __u16 family = BPF_CORE_READ(address, sa_family);
 
-    /* Only handle IPv4 for now */
-    if (family != 2)  /* AF_INET = 2 */
+    if (family != AF_INET && family != AF_INET6)
         return 0;
 
     __u64 cgid = bpf_get_current_cgroup_id();
@@ -904,45 +1048,30 @@ int BPF_PROG(handle_socket_bind, struct socket *sock,
     if (is_cgroup_allowed(cgid))
         return 0;
 
-    /* Extract port */
-    struct sockaddr_in *sin = (struct sockaddr_in *)address;
-    __u16 bind_port_be = BPF_CORE_READ(sin, sin_port);
-    __u16 bind_port = bpf_ntohs(bind_port_be);
+    /* Extract bind port */
+    __u16 bind_port = 0;
+    if (family == AF_INET) {
+        struct sockaddr_in *sin = (struct sockaddr_in *)address;
+        __u16 bind_port_be = BPF_CORE_READ(sin, sin_port);
+        bind_port = bpf_ntohs(bind_port_be);
+    } else {
+        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)address;
+        __u16 bind_port_be = BPF_CORE_READ(sin6, sin6_port);
+        bind_port = bpf_ntohs(bind_port_be);
+    }
 
     /* Get socket protocol */
     struct sock *sk = BPF_CORE_READ(sock, sk);
     __u8 protocol = sk ? BPF_CORE_READ(sk, sk_protocol) : 0;
 
-    int matched = 0;
-
-    /* Check port deny list for bind direction */
-    struct port_key pk = {
-        .port = bind_port,
-        .protocol = protocol,
-        .direction = 1  /* bind */
-    };
-    if (bpf_map_lookup_elem(&deny_port, &pk)) {
-        matched = 1;
-    } else {
-        /* Try with protocol=any */
-        pk.protocol = 0;
-        if (bpf_map_lookup_elem(&deny_port, &pk)) {
-            matched = 1;
-        } else {
-            /* Try with direction=both */
-            pk.direction = 2;
-            pk.protocol = protocol;
-            if (bpf_map_lookup_elem(&deny_port, &pk)) {
-                matched = 1;
-            }
-        }
-    }
+    int matched = port_rule_matches(bind_port, protocol, 1);
 
     if (!matched)
         return 0;
 
     /* Rule matched - process denial */
     __u8 audit = get_effective_audit_mode();
+    __u8 enforce_signal = get_effective_enforce_signal();
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
@@ -952,9 +1081,9 @@ int BPF_PROG(handle_socket_bind, struct socket *sock,
     increment_cgroup_stat(cgid);
     increment_net_port_stat(bind_port);
 
-    /* Send SIGKILL in enforce mode */
+    /* Optional signal in enforce mode (always deny with -EPERM). */
     if (!audit)
-        bpf_send_signal(SIGKILL);
+        maybe_send_enforce_signal(enforce_signal);
 
     /* Emit event */
     if (!should_emit_event(sample_rate))
@@ -973,10 +1102,7 @@ int BPF_PROG(handle_socket_bind, struct socket *sock,
         e->net_block.direction = 1;  /* bind */
         e->net_block.remote_ipv4 = 0;
         __builtin_memset(e->net_block.remote_ipv6, 0, sizeof(e->net_block.remote_ipv6));
-        if (audit)
-            __builtin_memcpy(e->net_block.action, "AUDIT", sizeof("AUDIT"));
-        else
-            __builtin_memcpy(e->net_block.action, "KILL", sizeof("KILL"));
+        set_action_string(e->net_block.action, audit, enforce_signal);
         __builtin_memcpy(e->net_block.rule_type, "port", 5);
         bpf_ringbuf_submit(e, 0);
     } else {

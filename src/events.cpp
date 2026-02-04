@@ -235,6 +235,15 @@ static std::string format_ipv4_addr(uint32_t ip_be)
     return std::string(buf);
 }
 
+static std::string format_ipv6_addr(const uint8_t ip[16])
+{
+    char buf[INET6_ADDRSTRLEN];
+    if (inet_ntop(AF_INET6, ip, buf, sizeof(buf)) == nullptr) {
+        return "::";
+    }
+    return std::string(buf);
+}
+
 static std::string protocol_to_string(uint8_t protocol)
 {
     switch (protocol) {
@@ -284,6 +293,9 @@ void print_net_block_event(const NetBlockEvent& ev)
         if (ev.family == 2) {
             oss << ",\"remote_ip\":\"" << format_ipv4_addr(ev.remote_ipv4) << "\"";
         }
+        else if (ev.family == 10) {
+            oss << ",\"remote_ip\":\"" << format_ipv6_addr(ev.remote_ipv6) << "\"";
+        }
         oss << ",\"remote_port\":" << ev.remote_port;
     }
     else {
@@ -301,7 +313,13 @@ void print_net_block_event(const NetBlockEvent& ev)
     }
 #ifdef HAVE_SYSTEMD
     if (sink_wants_journald(g_event_sink)) {
-        std::string remote_ip = (ev.family == 2) ? format_ipv4_addr(ev.remote_ipv4) : "";
+        std::string remote_ip;
+        if (ev.family == 2) {
+            remote_ip = format_ipv4_addr(ev.remote_ipv4);
+        }
+        else if (ev.family == 10) {
+            remote_ip = format_ipv6_addr(ev.remote_ipv6);
+        }
         journal_send_net_block(ev, payload, cgpath, comm, exec_id, parent_exec_id, event_type, remote_ip);
     }
 #endif

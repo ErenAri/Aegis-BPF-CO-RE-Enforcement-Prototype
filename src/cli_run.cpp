@@ -26,6 +26,39 @@ bool parse_u32_option(const std::string& value, uint32_t& out, const char* error
     return true;
 }
 
+bool parse_enforce_signal_option(const std::string& value, uint8_t& out)
+{
+    if (value == "none" || value == "block") {
+        out = kEnforceSignalNone;
+        return true;
+    }
+    if (value == "term" || value == "sigterm") {
+        out = kEnforceSignalTerm;
+        return true;
+    }
+    if (value == "kill" || value == "sigkill") {
+        out = kEnforceSignalKill;
+        return true;
+    }
+    if (value == "int" || value == "sigint") {
+        out = kEnforceSignalInt;
+        return true;
+    }
+
+    uint64_t signal = 0;
+    if (parse_uint64(value, signal) && signal <= UINT8_MAX &&
+        (signal == kEnforceSignalNone || signal == kEnforceSignalInt ||
+         signal == kEnforceSignalKill || signal == kEnforceSignalTerm)) {
+        out = static_cast<uint8_t>(signal);
+        return true;
+    }
+
+    logger().log(SLOG_ERROR("Invalid enforce signal")
+                     .field("value", value)
+                     .field("allowed", "none|term|kill|int|0|2|9|15"));
+    return false;
+}
+
 }  // namespace
 
 int dispatch_run_command(int argc, char** argv, const char* prog)
@@ -33,6 +66,7 @@ int dispatch_run_command(int argc, char** argv, const char* prog)
     bool audit_only = false;
     bool enable_seccomp = false;
     uint32_t deadman_ttl = 0;
+    uint8_t enforce_signal = kEnforceSignalTerm;
     uint32_t ringbuf_bytes = 0;
     uint32_t event_sample_rate = 1;
     LsmHookMode lsm_hook = LsmHookMode::FileOpen;
@@ -83,6 +117,14 @@ int dispatch_run_command(int argc, char** argv, const char* prog)
             if (i + 1 >= argc) return usage(prog);
             if (!parse_u32_option(argv[++i], event_sample_rate, "Invalid event sample rate", true)) return 1;
         }
+        else if (arg.rfind("--enforce-signal=", 0) == 0) {
+            std::string value = arg.substr(std::strlen("--enforce-signal="));
+            if (!parse_enforce_signal_option(value, enforce_signal)) return 1;
+        }
+        else if (arg == "--enforce-signal") {
+            if (i + 1 >= argc) return usage(prog);
+            if (!parse_enforce_signal_option(argv[++i], enforce_signal)) return 1;
+        }
         else if (arg.rfind("--lsm-hook=", 0) == 0) {
             std::string value = arg.substr(std::strlen("--lsm-hook="));
             if (!parse_lsm_hook(value, lsm_hook)) {
@@ -103,7 +145,7 @@ int dispatch_run_command(int argc, char** argv, const char* prog)
         }
     }
 
-    return daemon_run(audit_only, enable_seccomp, deadman_ttl, lsm_hook, ringbuf_bytes, event_sample_rate);
+    return daemon_run(audit_only, enable_seccomp, deadman_ttl, enforce_signal, lsm_hook, ringbuf_bytes, event_sample_rate);
 }
 
 }  // namespace aegis

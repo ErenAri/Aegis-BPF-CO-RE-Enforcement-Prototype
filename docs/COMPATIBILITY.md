@@ -34,7 +34,7 @@ AegisBPF operates in one of three capability levels based on kernel support:
 
 **Capabilities:**
 - Block file access (returns `EPERM`)
-- Send SIGKILL to processes accessing denied files
+- Optional enforce signal (`SIGTERM` by default, configurable to `SIGKILL`, `SIGINT`, or none)
 - Inode-based tracking
 - Full audit logging
 

@@ -224,10 +224,10 @@ Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues)
 
         // Network sections
         if (section == "deny_ip") {
-            // Validate IP format
             uint32_t ip_be;
-            if (!parse_ipv4(trimmed, ip_be)) {
-                issues.errors.push_back("line " + std::to_string(line_no) + ": invalid IPv4 address '" + trimmed + "'");
+            Ipv6Key ipv6{};
+            if (!parse_ipv4(trimmed, ip_be) && !parse_ipv6(trimmed, ipv6)) {
+                issues.errors.push_back("line " + std::to_string(line_no) + ": invalid IP address '" + trimmed + "'");
                 continue;
             }
             if (deny_ip_seen.insert(trimmed).second) {
@@ -238,10 +238,10 @@ Result<Policy> parse_policy_file(const std::string& path, PolicyIssues& issues)
         }
 
         if (section == "deny_cidr") {
-            // Validate CIDR format
             uint32_t ip_be;
             uint8_t prefix_len;
-            if (!parse_cidr_v4(trimmed, ip_be, prefix_len)) {
+            Ipv6Key ipv6{};
+            if (!parse_cidr_v4(trimmed, ip_be, prefix_len) && !parse_cidr_v6(trimmed, ipv6, prefix_len)) {
                 issues.errors.push_back("line " + std::to_string(line_no) + ": invalid CIDR notation '" + trimmed + "'");
                 continue;
             }
@@ -350,11 +350,17 @@ Result<void> reset_policy_maps(BpfState& state)
     if (state.deny_ipv4) {
         TRY(clear_map_entries(state.deny_ipv4));
     }
+    if (state.deny_ipv6) {
+        TRY(clear_map_entries(state.deny_ipv6));
+    }
     if (state.deny_port) {
         TRY(clear_map_entries(state.deny_port));
     }
     if (state.deny_cidr_v4) {
         TRY(clear_map_entries(state.deny_cidr_v4));
+    }
+    if (state.deny_cidr_v6) {
+        TRY(clear_map_entries(state.deny_cidr_v6));
     }
 
     std::error_code ec;
@@ -433,7 +439,7 @@ Result<void> apply_policy_internal_impl_fn(const std::string& path, const std::s
     // Apply network rules if enabled
     if (policy.network.enabled) {
         for (const auto& ip : policy.network.deny_ips) {
-            auto result = add_deny_ipv4(state, ip);
+            auto result = add_deny_ip(state, ip);
             if (!result) {
                 logger().log(SLOG_WARN("Failed to add deny IP")
                     .field("ip", ip)
@@ -441,7 +447,7 @@ Result<void> apply_policy_internal_impl_fn(const std::string& path, const std::s
             }
         }
         for (const auto& cidr : policy.network.deny_cidrs) {
-            auto result = add_deny_cidr_v4(state, cidr);
+            auto result = add_deny_cidr(state, cidr);
             if (!result) {
                 logger().log(SLOG_WARN("Failed to add deny CIDR")
                     .field("cidr", cidr)

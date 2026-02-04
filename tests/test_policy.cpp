@@ -100,6 +100,32 @@ cgid:1234567
     EXPECT_EQ(result->allow_cgroup_paths.size(), 1u);
 }
 
+TEST_F(PolicyTest, ParsePolicyWithIpv6NetworkRules)
+{
+    std::string content = R"(
+version=2
+
+[deny_ip]
+2001:db8::1
+
+[deny_cidr]
+2001:db8:abcd::/48
+
+[deny_port]
+443:tcp:egress
+)";
+    std::string path = CreateTestPolicy(content);
+    PolicyIssues issues;
+    auto result = parse_policy_file(path, issues);
+
+    EXPECT_TRUE(result);
+    EXPECT_FALSE(issues.has_errors());
+    EXPECT_TRUE(result->network.enabled);
+    EXPECT_EQ(result->network.deny_ips.size(), 1u);
+    EXPECT_EQ(result->network.deny_cidrs.size(), 1u);
+    EXPECT_EQ(result->network.deny_ports.size(), 1u);
+}
+
 TEST_F(PolicyTest, MissingVersion)
 {
     std::string content = R"(

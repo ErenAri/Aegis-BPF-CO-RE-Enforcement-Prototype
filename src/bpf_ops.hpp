@@ -58,14 +58,18 @@ class BpfState {
 
             // Network maps
             deny_ipv4 = other.deny_ipv4;
+            deny_ipv6 = other.deny_ipv6;
             deny_port = other.deny_port;
             deny_cidr_v4 = other.deny_cidr_v4;
+            deny_cidr_v6 = other.deny_cidr_v6;
             net_block_stats = other.net_block_stats;
             net_ip_stats = other.net_ip_stats;
             net_port_stats = other.net_port_stats;
             deny_ipv4_reused = other.deny_ipv4_reused;
+            deny_ipv6_reused = other.deny_ipv6_reused;
             deny_port_reused = other.deny_port_reused;
             deny_cidr_v4_reused = other.deny_cidr_v4_reused;
+            deny_cidr_v6_reused = other.deny_cidr_v6_reused;
             net_block_stats_reused = other.net_block_stats_reused;
             net_ip_stats_reused = other.net_ip_stats_reused;
             net_port_stats_reused = other.net_port_stats_reused;
@@ -74,8 +78,10 @@ class BpfState {
             other.obj = nullptr;
             other.survival_allowlist = nullptr;
             other.deny_ipv4 = nullptr;
+            other.deny_ipv6 = nullptr;
             other.deny_port = nullptr;
             other.deny_cidr_v4 = nullptr;
+            other.deny_cidr_v6 = nullptr;
             other.net_block_stats = nullptr;
             other.net_ip_stats = nullptr;
             other.net_port_stats = nullptr;
@@ -121,16 +127,20 @@ class BpfState {
 
     // Network maps
     bpf_map* deny_ipv4 = nullptr;
+    bpf_map* deny_ipv6 = nullptr;
     bpf_map* deny_port = nullptr;
     bpf_map* deny_cidr_v4 = nullptr;
+    bpf_map* deny_cidr_v6 = nullptr;
     bpf_map* net_block_stats = nullptr;
     bpf_map* net_ip_stats = nullptr;
     bpf_map* net_port_stats = nullptr;
 
     // Network reuse flags
     bool deny_ipv4_reused = false;
+    bool deny_ipv6_reused = false;
     bool deny_port_reused = false;
     bool deny_cidr_v4_reused = false;
+    bool deny_cidr_v6_reused = false;
     bool net_block_stats_reused = false;
     bool net_ip_stats_reused = false;
     bool net_port_stats_reused = false;

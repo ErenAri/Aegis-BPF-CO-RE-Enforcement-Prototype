@@ -36,7 +36,7 @@ AegisBPF emits events in JSON format to stdout or journald. See [event-schema.js
 | `dev` | integer | Device number |
 | `path` | string | Path of the file when available |
 | `resolved_path` | string | Canonical path (if different) |
-| `action` | string | `AUDIT` (audit-only) or `KILL` (enforce) |
+| `action` | string | `AUDIT` (audit-only) or enforce action (`TERM`/`KILL`/`INT`/`BLOCK`) |
 
 Note: when enforcement is inode-based, `path` may be empty; use `ino` + `dev` for correlation.
 

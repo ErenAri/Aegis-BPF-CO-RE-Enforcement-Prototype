@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <utility>
 #include <unistd.h>
 #include <vector>
 
@@ -239,12 +240,12 @@ int cmd_metrics(const std::string& out_path)
         std::sort(net_ip_stats.begin(), net_ip_stats.end(),
                   [](const auto& a, const auto& b) { return a.first < b.first; });
         append_metric_header(oss, "aegisbpf_net_blocks_by_ip_total", "counter",
-                             "Blocked network operations by IPv4 destination");
-        for (const auto& [ip_be, count] : net_ip_stats) {
+                             "Blocked network operations by destination IP");
+        for (const auto& [ip, count] : net_ip_stats) {
             append_metric_sample(
                 oss,
                 "aegisbpf_net_blocks_by_ip_total",
-                {{"ip", format_ipv4(ip_be)}},
+                {{"ip", ip}},
                 count);
         }
     }
@@ -282,10 +283,14 @@ int cmd_metrics(const std::string& out_path)
     append_metric_sample(oss, "aegisbpf_allow_cgroup_entries", safe_map_entry_count(state.allow_cgroup));
     append_metric_header(oss, "aegisbpf_net_rules_total", "gauge",
                          "Number of active network deny rules by type");
+    uint64_t ip_rule_count = static_cast<uint64_t>(safe_map_entry_count(state.deny_ipv4)) +
+                             static_cast<uint64_t>(safe_map_entry_count(state.deny_ipv6));
+    uint64_t cidr_rule_count = static_cast<uint64_t>(safe_map_entry_count(state.deny_cidr_v4)) +
+                               static_cast<uint64_t>(safe_map_entry_count(state.deny_cidr_v6));
     append_metric_sample(oss, "aegisbpf_net_rules_total", {{"type", "ip"}},
-                         safe_map_entry_count(state.deny_ipv4));
+                         ip_rule_count);
     append_metric_sample(oss, "aegisbpf_net_rules_total", {{"type", "cidr"}},
-                         safe_map_entry_count(state.deny_cidr_v4));
+                         cidr_rule_count);
     append_metric_sample(oss, "aegisbpf_net_rules_total", {{"type", "port"}},
                          safe_map_entry_count(state.deny_port));
 
@@ -461,32 +466,35 @@ int cmd_health(bool json_output)
     }
     required_pins_ok = true;
 
-    // Network maps are optional; validate them only when present in the loaded object.
-    if (state.deny_ipv4) {
+    // Network maps are optional; validate pin paths only for maps present in the loaded object.
+    const std::array<std::pair<bpf_map*, const char*>, 8> optional_network_maps = {{
+        {state.deny_ipv4, kDenyIpv4Pin},
+        {state.deny_ipv6, kDenyIpv6Pin},
+        {state.deny_port, kDenyPortPin},
+        {state.deny_cidr_v4, kDenyCidrV4Pin},
+        {state.deny_cidr_v6, kDenyCidrV6Pin},
+        {state.net_block_stats, kNetBlockStatsPin},
+        {state.net_ip_stats, kNetIpStatsPin},
+        {state.net_port_stats, kNetPortStatsPin},
+    }};
+    for (const auto& [map, pin_path] : optional_network_maps) {
+        if (!map) {
+            continue;
+        }
         network_maps_present = true;
-        const std::array<const char*, 6> optional_network_pins = {
-            kDenyIpv4Pin,
-            kDenyPortPin,
-            kDenyCidrV4Pin,
-            kNetBlockStatsPin,
-            kNetIpStatsPin,
-            kNetPortStatsPin,
-        };
-        for (const char* pin_path : optional_network_pins) {
-            auto pin_result = verify_pinned_map_access(pin_path);
-            if (!pin_result) {
-                network_pins_ok = false;
-                if (json_output) {
-                    emit_json(false, std::string("Network pinned map check failed: ") + pin_path + " (" +
-                                     pin_result.error().to_string() + ")");
-                }
-                else {
-                    logger().log(SLOG_ERROR("Network pinned map check failed")
-                                     .field("path", pin_path)
-                                     .field("error", pin_result.error().to_string()));
-                }
-                return 1;
+        auto pin_result = verify_pinned_map_access(pin_path);
+        if (!pin_result) {
+            network_pins_ok = false;
+            if (json_output) {
+                emit_json(false, std::string("Network pinned map check failed: ") + pin_path + " (" +
+                                 pin_result.error().to_string() + ")");
             }
+            else {
+                logger().log(SLOG_ERROR("Network pinned map check failed")
+                                 .field("path", pin_path)
+                                 .field("error", pin_result.error().to_string()));
+            }
+            return 1;
         }
     }
 

@@ -32,13 +32,17 @@ The agent can run in two modes:
 
 Start the security agent.
 
-**aegisbpf run** [**--audit**|**--enforce**] [**--seccomp**] [**--log**=*SINK*]
+**aegisbpf run** [**--audit**|**--enforce**] [**--enforce-signal**=*SIG*] [**--seccomp**] [**--log**=*SINK*]
 
 **--audit**
 :   Run in audit-only mode (observe but don't block). This is the default.
 
 **--enforce**
 :   Run in enforce mode (block matching executions). Requires BPF LSM.
+
+**--enforce-signal**=*SIG*
+:   Signal behavior for enforce mode. Valid values: `term` (default), `kill`, `int`, `none`.
+    `none` keeps blocking (`EPERM`) without sending a signal.
 
 **--seccomp**
 :   Apply seccomp-bpf filter after initialization for additional hardening.

@@ -13,7 +13,6 @@
 
 #include <cstdint>
 #include <iostream>
-#include <unistd.h>
 
 namespace aegis {
 
@@ -70,7 +69,7 @@ int cmd_network_deny_add_ip(const std::string& ip)
         return 1;
     }
 
-    auto add_result = add_deny_ipv4(state, ip);
+    auto add_result = add_deny_ip(state, ip);
     if (!add_result) {
         logger().log(SLOG_ERROR("Failed to add deny IP")
                          .field("ip", ip)
@@ -99,7 +98,7 @@ int cmd_network_deny_add_cidr(const std::string& cidr)
         return 1;
     }
 
-    auto add_result = add_deny_cidr_v4(state, cidr);
+    auto add_result = add_deny_cidr(state, cidr);
     if (!add_result) {
         logger().log(SLOG_ERROR("Failed to add deny CIDR")
                          .field("cidr", cidr)
@@ -151,22 +150,28 @@ int cmd_network_deny_add_port(uint16_t port, const std::string& protocol_str, co
 
 int cmd_network_deny_del_ip(const std::string& ip)
 {
-    uint32_t ip_be = 0;
-    if (!parse_ipv4(ip, ip_be)) {
-        logger().log(SLOG_ERROR("Invalid IP address").field("ip", ip));
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
         return 1;
     }
 
-    int fd = bpf_obj_get(kDenyIpv4Pin);
-    if (fd < 0) {
-        logger().log(SLOG_ERROR("deny_ipv4 map not found"));
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
         return 1;
     }
 
-    if (bpf_map_delete_elem(fd, &ip_be) != 0) {
-        logger().log(SLOG_WARN("IP not found in deny list").field("ip", ip));
+    auto del_result = del_deny_ip(state, ip);
+    if (!del_result) {
+        logger().log(SLOG_ERROR("Failed to remove deny IP")
+                         .field("ip", ip)
+                         .field("error", del_result.error().to_string()));
+        return 1;
     }
-    close(fd);
 
     logger().log(SLOG_INFO("Removed deny IP").field("ip", ip));
     return 0;
@@ -174,28 +179,28 @@ int cmd_network_deny_del_ip(const std::string& ip)
 
 int cmd_network_deny_del_cidr(const std::string& cidr)
 {
-    uint32_t ip_be = 0;
-    uint8_t prefix_len = 0;
-    if (!parse_cidr_v4(cidr, ip_be, prefix_len)) {
-        logger().log(SLOG_ERROR("Invalid CIDR").field("cidr", cidr));
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
         return 1;
     }
 
-    int fd = bpf_obj_get(kDenyCidrV4Pin);
-    if (fd < 0) {
-        logger().log(SLOG_ERROR("deny_cidr_v4 map not found"));
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
         return 1;
     }
 
-    struct {
-        uint32_t prefixlen;
-        uint32_t addr;
-    } key = {prefix_len, ip_be};
-
-    if (bpf_map_delete_elem(fd, &key) != 0) {
-        logger().log(SLOG_WARN("CIDR not found in deny list").field("cidr", cidr));
+    auto del_result = del_deny_cidr(state, cidr);
+    if (!del_result) {
+        logger().log(SLOG_ERROR("Failed to remove deny CIDR")
+                         .field("cidr", cidr)
+                         .field("error", del_result.error().to_string()));
+        return 1;
     }
-    close(fd);
 
     logger().log(SLOG_INFO("Removed deny CIDR").field("cidr", cidr));
     return 0;
@@ -209,21 +214,28 @@ int cmd_network_deny_del_port(uint16_t port, const std::string& protocol_str, co
     uint8_t direction = 2;
     if (!parse_direction(direction_str, direction)) return 1;
 
-    int fd = bpf_obj_get(kDenyPortPin);
-    if (fd < 0) {
-        logger().log(SLOG_ERROR("deny_port map not found"));
+    auto rlimit_result = bump_memlock_rlimit();
+    if (!rlimit_result) {
+        logger().log(SLOG_ERROR("Failed to raise memlock rlimit")
+                         .field("error", rlimit_result.error().to_string()));
         return 1;
     }
 
-    PortKey key{};
-    key.port = port;
-    key.protocol = protocol;
-    key.direction = direction;
-
-    if (bpf_map_delete_elem(fd, &key) != 0) {
-        logger().log(SLOG_WARN("Port not found in deny list").field("port", static_cast<int64_t>(port)));
+    BpfState state;
+    auto load_result = load_bpf(true, false, state);
+    if (!load_result) {
+        logger().log(SLOG_ERROR("Failed to load BPF object")
+                         .field("error", load_result.error().to_string()));
+        return 1;
     }
-    close(fd);
+
+    auto del_result = del_deny_port(state, port, protocol, direction);
+    if (!del_result) {
+        logger().log(SLOG_ERROR("Failed to remove deny port")
+                         .field("port", static_cast<int64_t>(port))
+                         .field("error", del_result.error().to_string()));
+        return 1;
+    }
 
     logger().log(SLOG_INFO("Removed deny port").field("port", static_cast<int64_t>(port)));
     return 0;
@@ -248,6 +260,14 @@ int cmd_network_deny_list()
             }
         }
     }
+    if (state.deny_ipv6) {
+        auto ips_result = list_deny_ipv6(state);
+        if (ips_result) {
+            for (const auto& ip : *ips_result) {
+                std::cout << "  " << format_ipv6(ip) << std::endl;
+            }
+        }
+    }
 
     std::cout << "\nDenied CIDRs:" << std::endl;
     if (state.deny_cidr_v4) {
@@ -255,6 +275,14 @@ int cmd_network_deny_list()
         if (cidrs_result) {
             for (const auto& cidr : *cidrs_result) {
                 std::cout << "  " << format_cidr_v4(cidr.first, cidr.second) << std::endl;
+            }
+        }
+    }
+    if (state.deny_cidr_v6) {
+        auto cidrs_result = list_deny_cidr_v6(state);
+        if (cidrs_result) {
+            for (const auto& cidr : *cidrs_result) {
+                std::cout << "  " << format_cidr_v6(cidr.first, cidr.second) << std::endl;
             }
         }
     }
@@ -286,8 +314,14 @@ int cmd_network_deny_clear()
     if (state.deny_ipv4) {
         clear_map_entries(state.deny_ipv4);
     }
+    if (state.deny_ipv6) {
+        clear_map_entries(state.deny_ipv6);
+    }
     if (state.deny_cidr_v4) {
         clear_map_entries(state.deny_cidr_v4);
+    }
+    if (state.deny_cidr_v6) {
+        clear_map_entries(state.deny_cidr_v6);
     }
     if (state.deny_port) {
         clear_map_entries(state.deny_port);

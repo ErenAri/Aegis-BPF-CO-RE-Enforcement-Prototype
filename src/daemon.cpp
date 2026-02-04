@@ -97,6 +97,22 @@ Result<void> setup_agent_cgroup(BpfState& state)
     return {};
 }
 
+const char* enforce_signal_name(uint8_t signal)
+{
+    switch (signal) {
+    case kEnforceSignalNone:
+        return "none";
+    case kEnforceSignalInt:
+        return "sigint";
+    case kEnforceSignalKill:
+        return "sigkill";
+    case kEnforceSignalTerm:
+        return "sigterm";
+    default:
+        return "sigterm";
+    }
+}
+
 }  // namespace
 
 const char* lsm_hook_name(LsmHookMode mode)
@@ -133,6 +149,7 @@ bool parse_lsm_hook(const std::string& value, LsmHookMode& out)
 int daemon_run(bool audit_only,
                bool enable_seccomp,
                uint32_t deadman_ttl,
+               uint8_t enforce_signal,
                LsmHookMode lsm_hook,
                uint32_t ringbuf_bytes,
                uint32_t event_sample_rate)
@@ -142,6 +159,15 @@ int daemon_run(bool audit_only,
     if (break_glass_active) {
         logger().log(SLOG_WARN("Break-glass mode detected - forcing audit-only mode"));
         audit_only = true;
+    }
+
+    if (enforce_signal != kEnforceSignalNone &&
+        enforce_signal != kEnforceSignalInt &&
+        enforce_signal != kEnforceSignalKill &&
+        enforce_signal != kEnforceSignalTerm) {
+        logger().log(SLOG_WARN("Invalid enforce signal configured; using SIGTERM")
+                         .field("signal", static_cast<int64_t>(enforce_signal)));
+        enforce_signal = kEnforceSignalTerm;
     }
 
     // Validate config directory permissions (security check)
@@ -226,6 +252,7 @@ int daemon_run(bool audit_only,
     config.audit_only = audit_only ? 1 : 0;
     config.break_glass_active = break_glass_active ? 1 : 0;
     config.deadman_enabled = (deadman_ttl > 0) ? 1 : 0;
+    config.enforce_signal = enforce_signal;
     config.deadman_ttl_seconds = deadman_ttl;
     config.event_sample_rate = event_sample_rate ? event_sample_rate : 1;
     if (config.deadman_enabled) {
@@ -282,9 +309,10 @@ int daemon_run(bool audit_only,
         }
     }
 
-    bool network_enabled = lsm_enabled && state.deny_ipv4 != nullptr;
+    bool network_enabled = lsm_enabled && (state.deny_ipv4 != nullptr || state.deny_ipv6 != nullptr);
     logger().log(SLOG_INFO("Agent started")
                      .field("audit_only", audit_only)
+                     .field("enforce_signal", enforce_signal_name(config.enforce_signal))
                      .field("lsm_enabled", lsm_enabled)
                      .field("lsm_hook", lsm_hook_name(lsm_hook))
                      .field("network_enabled", network_enabled)

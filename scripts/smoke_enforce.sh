@@ -36,7 +36,7 @@ LOGFILE=$(mktemp)
 INO=$(stat -c %i "$TMPFILE")
 
 echo "[*] Starting agent (enforce mode)..."
-"$BIN" run --enforce >"$LOGFILE" 2>&1 &
+"$BIN" run --enforce --enforce-signal=kill >"$LOGFILE" 2>&1 &
 AGENT_PID=$!
 sleep 1
 if ! kill -0 "$AGENT_PID" 2>/dev/null; then

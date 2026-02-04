@@ -134,8 +134,8 @@
         },
         "action": {
           "type": "string",
-          "enum": ["AUDIT", "KILL"],
-          "description": "Action taken (AUDIT for audit-only, KILL for enforce)"
+          "enum": ["AUDIT", "INT", "TERM", "KILL", "BLOCK"],
+          "description": "Action taken (AUDIT in audit mode, enforce action in enforce mode)"
         },
         "comm": {
           "type": "string",

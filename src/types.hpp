@@ -23,8 +23,10 @@ inline constexpr const char* kBpfObjInstallPath = "/usr/lib/aegisbpf/aegis.bpf.o
 
 // Network map pin paths
 inline constexpr const char* kDenyIpv4Pin = "/sys/fs/bpf/aegisbpf/deny_ipv4";
+inline constexpr const char* kDenyIpv6Pin = "/sys/fs/bpf/aegisbpf/deny_ipv6";
 inline constexpr const char* kDenyPortPin = "/sys/fs/bpf/aegisbpf/deny_port";
 inline constexpr const char* kDenyCidrV4Pin = "/sys/fs/bpf/aegisbpf/deny_cidr_v4";
+inline constexpr const char* kDenyCidrV6Pin = "/sys/fs/bpf/aegisbpf/deny_cidr_v6";
 inline constexpr const char* kNetBlockStatsPin = "/sys/fs/bpf/aegisbpf/net_block_stats";
 inline constexpr const char* kNetIpStatsPin = "/sys/fs/bpf/aegisbpf/net_ip_stats";
 inline constexpr const char* kNetPortStatsPin = "/sys/fs/bpf/aegisbpf/net_port_stats";
@@ -43,6 +45,10 @@ inline constexpr const char* kBpfObjHashPath = "/etc/aegisbpf/aegis.bpf.sha256";
 inline constexpr const char* kBpfObjHashInstallPath = "/usr/lib/aegisbpf/aegis.bpf.sha256";
 inline constexpr uint32_t kLayoutVersion = 1;
 inline constexpr size_t kDenyPathMax = 256;
+inline constexpr uint8_t kEnforceSignalNone = 0;
+inline constexpr uint8_t kEnforceSignalInt = 2;
+inline constexpr uint8_t kEnforceSignalKill = 9;
+inline constexpr uint8_t kEnforceSignalTerm = 15;
 
 enum EventType : uint32_t {
     EVENT_EXEC = 1,
@@ -93,7 +99,7 @@ struct NetBlockEvent {
     uint8_t _pad;
     uint32_t remote_ipv4;  /* Network byte order */
     uint8_t remote_ipv6[16];
-    char action[8];        /* "AUDIT" or "KILL" */
+    char action[8];        /* "AUDIT", "TERM", "KILL", or "BLOCK" */
     char rule_type[16];    /* "ip", "port", "cidr" */
 };
 
@@ -140,6 +146,21 @@ struct PortKeyHash {
 struct Ipv4LpmKey {
     uint32_t prefixlen;
     uint32_t addr;  /* Network byte order */
+};
+
+struct Ipv6Key {
+    uint8_t addr[16];
+};
+
+struct Ipv6LpmKey {
+    uint32_t prefixlen;
+    uint8_t addr[16];
+};
+
+struct NetIpKey {
+    uint8_t family;  /* AF_INET=2, AF_INET6=10 */
+    uint8_t pad[3];
+    uint8_t addr[16];
 };
 
 struct InodeId {
@@ -191,7 +212,7 @@ struct AgentConfig {
     uint8_t audit_only;
     uint8_t deadman_enabled;
     uint8_t break_glass_active;
-    uint8_t _pad;
+    uint8_t enforce_signal; /* 0=none, 2=SIGINT, 9=SIGKILL, 15=SIGTERM */
     uint64_t deadman_deadline_ns;
     uint32_t deadman_ttl_seconds;
     uint32_t event_sample_rate;

@@ -410,6 +410,12 @@ if(BUILD_TESTING)
         COMMAND $<TARGET_FILE:aegisbpf> health --json --unknown
     )
     set_tests_properties(cli_health_json_rejects_unknown_flag PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_run_rejects_invalid_enforce_signal
+        COMMAND $<TARGET_FILE:aegisbpf> run --enforce --enforce-signal=bad
+    )
+    set_tests_properties(cli_run_rejects_invalid_enforce_signal PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # Fuzzing targets

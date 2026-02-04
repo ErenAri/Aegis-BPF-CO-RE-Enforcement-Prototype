@@ -44,6 +44,20 @@ TEST(ParseIpv4Test, OutOfRangeOctet)
     EXPECT_FALSE(parse_ipv4("192.168.1.256", ip_be));
 }
 
+TEST(ParseIpv6Test, ValidIp)
+{
+    Ipv6Key ip{};
+    EXPECT_TRUE(parse_ipv6("2001:db8::1", ip));
+}
+
+TEST(ParseIpv6Test, InvalidFormat)
+{
+    Ipv6Key ip{};
+    EXPECT_FALSE(parse_ipv6("2001:db8::zzz", ip));
+    EXPECT_FALSE(parse_ipv6("192.168.1.1", ip));
+    EXPECT_FALSE(parse_ipv6("", ip));
+}
+
 TEST(ParseCidrV4Test, ValidCidr)
 {
     uint32_t ip_be = 0;
@@ -75,6 +89,28 @@ TEST(ParseCidrV4Test, MissingPrefix)
     EXPECT_FALSE(parse_cidr_v4("192.168.1.0", ip_be, prefix));
 }
 
+TEST(ParseCidrV6Test, ValidCidr)
+{
+    Ipv6Key ip{};
+    uint8_t prefix = 0;
+    EXPECT_TRUE(parse_cidr_v6("2001:db8::/32", ip, prefix));
+    EXPECT_EQ(prefix, 32);
+}
+
+TEST(ParseCidrV6Test, InvalidPrefix)
+{
+    Ipv6Key ip{};
+    uint8_t prefix = 0;
+    EXPECT_FALSE(parse_cidr_v6("2001:db8::/129", ip, prefix));
+}
+
+TEST(ParseCidrV6Test, MissingPrefix)
+{
+    Ipv6Key ip{};
+    uint8_t prefix = 0;
+    EXPECT_FALSE(parse_cidr_v6("2001:db8::1", ip, prefix));
+}
+
 TEST(FormatIpv4Test, ValidAddresses)
 {
     // Test roundtrip
@@ -90,6 +126,13 @@ TEST(FormatIpv4Test, Localhost)
     EXPECT_TRUE(parse_ipv4("127.0.0.1", ip_be));
     std::string formatted = format_ipv4(ip_be);
     EXPECT_EQ(formatted, "127.0.0.1");
+}
+
+TEST(FormatIpv6Test, ValidAddresses)
+{
+    Ipv6Key ip{};
+    EXPECT_TRUE(parse_ipv6("2001:db8::abcd", ip));
+    EXPECT_EQ(format_ipv6(ip), "2001:db8::abcd");
 }
 
 TEST(ProtocolNameTest, KnownProtocols)

@@ -1,5 +1,7 @@
 .idea/
 /build/
+/build-bpf/
+/build-dev/
 /build-asan/
 /build-coverage/
 /build-fuzz/

@@ -36,6 +36,7 @@
 - **Kernel-level blocking** - Uses BPF LSM hooks to block file opens before they complete
 - **Inode-based rules** - Block by device:inode for reliable identification across renames
 - **Path-based rules** - Block by file path for human-readable policies
+- **Dual-stack network policy** - Deny IPv4 and IPv6 IP/CIDR/port rules in kernel hooks
 - **Cgroup allowlisting** - Exempt trusted workloads from deny rules
 - **Audit mode** - Monitor without blocking (works without BPF LSM)
 - **Prometheus metrics** - Export block counts and statistics
@@ -130,6 +131,9 @@ sudo ./build/aegisbpf run --audit
 # Enforce mode (block matching file opens)
 sudo ./build/aegisbpf run --enforce
 
+# Enforce mode with explicit signal policy (default is SIGTERM)
+sudo ./build/aegisbpf run --enforce --enforce-signal=term
+
 # With JSON logging
 sudo ./build/aegisbpf run --log-format=json
 
@@ -165,7 +169,7 @@ sudo ./build/aegisbpf run --audit --ringbuf-bytes=67108864 --event-sample-rate=1
          │                            │            │
          │                            │            ▼
          │                            │   audit mode -> emit event, allow
-         │                            │   enforce    -> SIGKILL + -EPERM
+         │                            │   enforce    -> optional signal + -EPERM
          │                            │                            │
          │  Success / EPERM           │                            │
          │ ◄──────────────────────────│                            │
@@ -181,6 +185,10 @@ sudo ./build/aegisbpf run --audit --ringbuf-bytes=67108864 --event-sample-rate=1
 sudo aegisbpf run --enforce --lsm-hook=file
 sudo aegisbpf run --enforce --lsm-hook=inode
 sudo aegisbpf run --enforce --lsm-hook=both
+
+# Choose enforce signal action (default: term)
+sudo aegisbpf run --enforce --enforce-signal=term
+sudo aegisbpf run --enforce --enforce-signal=none
 
 # Increase ring buffer size (bytes) to reduce ringbuf drops
 sudo aegisbpf run --audit --ringbuf-bytes=67108864
@@ -369,7 +377,8 @@ For production, set `AEGIS_POLICY` to a signed policy bundle path (for example
                     │                                │
                     │  ┌──────────────────────────┐  │
                     │  │ deny_* / allow_cgroup    │  │
-                    │  │ deny_ipv4/deny_cidr/port │  │
+                    │  │ deny_ipv4/deny_ipv6      │  │
+                    │  │ deny_cidr_v4/v6 + port   │  │
                     │  │ net_* stats + block_stats│  │
                     │  │ survival_allowlist/meta  │  │
                     │  │ events       (ring buf)  │  │

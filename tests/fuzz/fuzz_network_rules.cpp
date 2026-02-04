@@ -28,10 +28,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     // Test IPv4 parsing
     uint32_t ip_be = 0;
     aegis::parse_ipv4(input, ip_be);
+    aegis::Ipv6Key ipv6{};
+    aegis::parse_ipv6(input, ipv6);
 
     // Test CIDR parsing
     uint8_t prefix_len = 0;
     aegis::parse_cidr_v4(input, ip_be, prefix_len);
+    aegis::parse_cidr_v6(input, ipv6, prefix_len);
 
     // Test port parsing with various formats
     // Format: port[:protocol[:direction]]
@@ -49,6 +52,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     // Test IP formatting (inverse operation)
     std::string formatted = aegis::format_ipv4(ip_be);
     (void)formatted;
+    std::string formatted_v6 = aegis::format_ipv6(ipv6);
+    (void)formatted_v6;
 
     return 0;
 }
