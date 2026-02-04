@@ -30,6 +30,9 @@ jobs:
       - name: Run benchmarks
         run: |
           ./build-bench/aegisbpf_bench \
+            --benchmark_min_time=0.2 \
+            --benchmark_repetitions=8 \
+            --benchmark_report_aggregates_only=true \
             --benchmark_format=json \
             --benchmark_out=benchmark.json \
             --benchmark_out_format=json
@@ -43,8 +46,21 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Store benchmark result
-        if: steps.benchmark-history.outputs.exists == 'true'
+      - name: Store benchmark result (PR advisory)
+        if: steps.benchmark-history.outputs.exists == 'true' && github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: googlecpp
+          output-file-path: benchmark.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          alert-threshold: '150%'
+          fail-on-alert: false
+          comment-on-alert: false
+          summary-always: true
+
+      - name: Store benchmark result (main strict)
+        if: steps.benchmark-history.outputs.exists == 'true' && github.event_name != 'pull_request'
         uses: benchmark-action/github-action-benchmark@v1
         with:
           tool: googlecpp

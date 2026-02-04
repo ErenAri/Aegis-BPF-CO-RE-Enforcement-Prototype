@@ -23,6 +23,7 @@ deliver each requirement.
 - Compatibility testing across supported kernel versions.
 - Policy signature or integrity checks for production deployments.
 - Packaging for target OSes (deb/rpm) and systemd integration.
+- Explicit threat model with in-scope/out-of-scope boundaries and blind spots.
 
 ## P2 (quality and operational maturity)
 - Upgrade/migration guide for pinned maps and policy format.
@@ -69,6 +70,9 @@ deliver each requirement.
 - Incident response runbook: `docs/INCIDENT_RESPONSE.md`
 - Operational runbook pack: `docs/runbooks/` (alerts/incidents/maintenance/recovery)
 - Support and deprecation policy: `docs/SUPPORT_POLICY.md`
+- Threat model and bypass boundaries: `docs/THREAT_MODEL.md`
+- Policy runtime semantics: `docs/POLICY_SEMANTICS.md`
+- Metrics interpretation guide: `docs/METRICS_OPERATIONS.md`
 - Final go/no-go checklist: `docs/GO_LIVE_CHECKLIST.md`
 - Branch-protection baseline: `docs/BRANCH_PROTECTION.md` + `scripts/check_branch_protection.sh`
 - Branch-protection audit workflow: `.github/workflows/branch-protection-audit.yml`

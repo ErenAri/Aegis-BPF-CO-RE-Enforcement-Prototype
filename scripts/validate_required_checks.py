@@ -87,8 +87,9 @@ def expand_job_name(name_template: str, row: dict[str, Any]) -> str:
     return MATRIX_REF_RE.sub(repl, name_template)
 
 
-def discover_contexts() -> set[str]:
+def discover_contexts() -> tuple[set[str], set[str]]:
     contexts: set[str] = set()
+    job_names: set[str] = set()
 
     for workflow_path in WORKFLOW_FILES:
         data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
@@ -106,9 +107,10 @@ def discover_contexts() -> set[str]:
             rows = matrix_rows(job)
             for row in rows:
                 job_name = expand_job_name(name_template, row)
+                job_names.add(job_name)
                 contexts.add(f"{workflow_name} / {job_name}")
 
-    return contexts
+    return contexts, job_names
 
 
 def main() -> int:
@@ -117,19 +119,25 @@ def main() -> int:
     args = parser.parse_args()
 
     required_files = [Path(p) for p in args.required]
-    contexts = discover_contexts()
+    contexts, job_names = discover_contexts()
     status = 0
 
     for req_file in required_files:
         required = load_required(req_file)
-        missing = sorted(item for item in required if item not in contexts)
+        missing = sorted(
+            item for item in required if item not in contexts and item not in job_names
+        )
         if missing:
             status = 1
-            print(f"Missing workflow contexts referenced by {req_file}:")
+            print(
+                f"Missing workflow contexts/job names referenced by {req_file}:"
+            )
             for item in missing:
                 print(f"  - {item}")
         else:
-            print(f"{req_file}: all entries map to existing workflow contexts.")
+            print(
+                f"{req_file}: all entries map to existing workflow contexts/job names."
+            )
 
     return status
 

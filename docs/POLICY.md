@@ -3,6 +3,9 @@
 Policy files are line-oriented and ASCII-only. Lines starting with `#` are
 comments. Blank lines are ignored.
 
+For normative runtime behavior (evaluation order, namespace effects, inode/path
+edge cases), see `docs/POLICY_SEMANTICS.md`.
+
 ## Header
 
 The header is a set of `key=value` pairs before any section.
@@ -22,13 +25,21 @@ One path per line. The path must exist when applying the policy because the
 agent resolves the inode for enforcement. Relative paths are allowed but
 discouraged.
 
+Note: enforce decisions are inode-driven; path entries are also kept for
+tracepoint-audit observability.
+
 ### [deny_inode]
 One entry per line in `dev:ino` format. These are enforced only when BPF LSM is
 enabled (tracepoint fallback does not match inodes).
 
+Inode rules survive rename/hardlink changes but can be affected by inode reuse
+after delete/recreate cycles.
+
 ### [allow_cgroup]
 One entry per line. Use a cgroup path (preferred) or `cgid:<id>` when a path is
 not available.
+
+This section is an explicit bypass control: matching cgroups skip deny rules.
 
 ## CLI lifecycle
 

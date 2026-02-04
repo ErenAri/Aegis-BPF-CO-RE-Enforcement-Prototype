@@ -849,5 +849,7 @@ inline constexpr uint32_t kLayoutVersion = 1;
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design overview
 - [POLICY.md](POLICY.md) - Policy file format details
+- [POLICY_SEMANTICS.md](POLICY_SEMANTICS.md) - Runtime semantics and edge cases
+- [THREAT_MODEL.md](THREAT_MODEL.md) - Security boundaries and blind spots
 - [NETWORK_LAYER_DESIGN.md](NETWORK_LAYER_DESIGN.md) - Network blocking design
 - [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md) - Key rotation procedures

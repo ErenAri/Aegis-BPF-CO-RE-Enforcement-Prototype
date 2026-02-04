@@ -76,6 +76,20 @@ AegisBPF cannot run if:
 
 \* Requires adding `lsm=bpf` or `lsm=landlock,lockdown,yama,bpf` to kernel boot parameters.
 
+## Distribution and Runtime Quirks
+
+- **Ubuntu 22.04 (5.15)**: stable baseline for LSM hooks; ensure BTF package is present on custom kernels.
+- **Ubuntu 24.04 (6.5+)**: newer libbpf/kernel combos are generally smoother for CO-RE.
+- **RHEL 9.x (5.14)**: verify backported BPF features; some behavior differs from upstream 5.14 docs.
+- **Container hosts**: run the agent in host PID/cgroup/mount namespaces for deterministic cgroup and path behavior.
+- **Kubernetes**: privileged pods (or pods with host-level capabilities) are outside normal workload threat assumptions.
+
+## Filesystem and Namespace Notes
+
+- Path canonicalization is performed in the agent namespace at policy-apply time.
+- Bind mounts and overlay filesystems can present alternative path views for the same inode.
+- Inode-based rules remain the primary enforcement primitive; path-only expectations can diverge in namespaced setups.
+
 ## Enabling BPF LSM
 
 ### Method 1: GRUB (Recommended)
