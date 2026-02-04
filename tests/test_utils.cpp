@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <unistd.h>
 
 namespace aegis {
@@ -241,6 +242,14 @@ TEST(BuildExecIdTest, ZeroPid)
 TEST(BuildExecIdTest, ZeroStartTime)
 {
     EXPECT_EQ(build_exec_id(1234, 0), "");
+}
+
+TEST(ResolveCgroupPathTest, InvalidCgroupIdDoesNotThrow)
+{
+    EXPECT_NO_THROW({
+        std::string path = resolve_cgroup_path(std::numeric_limits<uint64_t>::max());
+        (void)path;
+    });
 }
 
 TEST(ValidatePathTest, EmptyPath)

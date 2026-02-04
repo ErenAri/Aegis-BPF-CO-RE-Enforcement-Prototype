@@ -233,24 +233,35 @@ std::string CgroupPathCache::resolve(uint64_t cgid)
         }
     }
 
-    std::error_code ec;
-    std::filesystem::recursive_directory_iterator dir(
-        "/sys/fs/cgroup",
-        std::filesystem::directory_options::skip_permission_denied,
-        ec);
     std::string found;
-    for (; dir != std::filesystem::recursive_directory_iterator(); ++dir) {
-        if (!dir->is_directory()) {
-            continue;
+    try {
+        std::error_code ec;
+        std::filesystem::recursive_directory_iterator dir(
+            "/sys/fs/cgroup",
+            std::filesystem::directory_options::skip_permission_denied,
+            ec);
+        if (!ec) {
+            auto end = std::filesystem::recursive_directory_iterator();
+            for (; dir != end;) {
+                std::error_code entry_ec;
+                const bool is_directory = dir->is_directory(entry_ec);
+                if (!entry_ec && is_directory) {
+                    struct stat st {};
+                    const auto path = dir->path();
+                    if (stat(path.c_str(), &st) == 0 && static_cast<uint64_t>(st.st_ino) == cgid) {
+                        found = path.string();
+                        break;
+                    }
+                }
+                dir.increment(entry_ec);
+                if (entry_ec) {
+                    entry_ec.clear();
+                }
+            }
         }
-        struct stat st {};
-        if (stat(dir->path().c_str(), &st) != 0) {
-            continue;
-        }
-        if (static_cast<uint64_t>(st.st_ino) == cgid) {
-            found = dir->path().string();
-            break;
-        }
+    }
+    catch (const std::exception&) {
+        found.clear();
     }
 
     {
