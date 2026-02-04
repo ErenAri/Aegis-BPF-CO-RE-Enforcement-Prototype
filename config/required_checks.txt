@@ -12,9 +12,9 @@ sanitizers (ubsan)
 sbom
 smoke-fuzz
 test
+readiness (ubuntu-22.04)
+readiness (ubuntu-24.04)
 dependency-review
 codeql
 gitleaks
 semgrep
-readiness (ubuntu-22.04)
-readiness (ubuntu-24.04)

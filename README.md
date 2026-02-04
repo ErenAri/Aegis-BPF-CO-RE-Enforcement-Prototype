@@ -44,6 +44,25 @@
 - **Policy files and signed bundles** - Declarative configuration with SHA256 verification and signature enforcement
 - **Kubernetes ready** - Helm chart for DaemonSet deployment
 
+## Claim Taxonomy
+
+To avoid overclaiming, features are labeled as:
+
+- `ENFORCED`: operation is denied in-kernel in supported mode
+- `AUDITED`: operation is observed/logged but not denied
+- `PLANNED`: not shipped yet
+
+Current flagship contract (`docs/MATURITY_PROGRAM.md`):
+
+> Block unauthorized file opens/reads using inode-first enforcement for
+> cgroup-scoped workloads, with safe rollback and signed policy provenance.
+
+Current scope labels:
+- `ENFORCED`: file deny via LSM (`file_open` / `inode_permission`), network
+  deny for configured connect/bind rules when LSM hooks are available
+- `AUDITED`: tracepoint fallback path (no syscall deny), detailed metrics mode
+- `PLANNED`: broader runtime surfaces beyond current documented hooks
+
 ## Architecture
 
 ```
@@ -504,6 +523,7 @@ Security boundaries, attacker model, and known blind spots are documented in
 | [POLICY_SEMANTICS.md](docs/POLICY_SEMANTICS.md) | Precise runtime rule semantics and edge-case behavior |
 | [NETWORK_LAYER_DESIGN.md](docs/NETWORK_LAYER_DESIGN.md) | Network blocking architecture |
 | [THREAT_MODEL.md](docs/THREAT_MODEL.md) | Threat model, coverage boundaries, and known bypass surface |
+| [MATURITY_PROGRAM.md](docs/MATURITY_PROGRAM.md) | Phase-gated maturity ladder with numeric completion criteria |
 
 ### Operations
 
@@ -530,6 +550,7 @@ Security boundaries, attacker model, and known blind spots are documented in
 | [PERF.md](docs/PERF.md) | Performance tuning and benchmarking |
 | [BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) | Protected-branch baseline and required checks |
 | [QUALITY_GATES.md](docs/QUALITY_GATES.md) | CI gate policy and coverage ratchet expectations |
+| [CI_EXECUTION_STRATEGY.md](docs/CI_EXECUTION_STRATEGY.md) | Privileged CI and kernel-matrix execution strategy |
 | [repo_labels.json](config/repo_labels.json) | Repository label source of truth for triage/release policy |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Version history |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributor workflow and local quality checks |

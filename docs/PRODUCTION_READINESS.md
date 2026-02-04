@@ -4,6 +4,9 @@ This checklist captures the minimum bar for a senior-level, production-ready
 release. Items are grouped by priority. Track completion and evidence as you
 deliver each requirement.
 
+For phase-by-phase numeric gates and the current MVP freeze contract, see
+`docs/MATURITY_PROGRAM.md`.
+
 ## P0 (must-have before production)
 - Policy format is versioned, validated, and backward-compatible (or has a
   clear migration plan).
@@ -73,6 +76,8 @@ deliver each requirement.
 - Threat model and bypass boundaries: `docs/THREAT_MODEL.md`
 - Policy runtime semantics: `docs/POLICY_SEMANTICS.md`
 - Metrics interpretation guide: `docs/METRICS_OPERATIONS.md`
+- Maturity phase gates and done criteria: `docs/MATURITY_PROGRAM.md`
+- CI kernel-e2e execution strategy: `docs/CI_EXECUTION_STRATEGY.md`
 - Final go/no-go checklist: `docs/GO_LIVE_CHECKLIST.md`
 - Branch-protection baseline: `docs/BRANCH_PROTECTION.md` + `scripts/check_branch_protection.sh`
 - Branch-protection audit workflow: `.github/workflows/branch-protection-audit.yml`

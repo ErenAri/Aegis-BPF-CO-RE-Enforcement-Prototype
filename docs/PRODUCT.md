@@ -5,6 +5,16 @@ senior-level, production-ready AegisBPF agent.
 
 For full attacker-model detail, coverage boundaries, and known bypass surfaces,
 see `docs/THREAT_MODEL.md`.
+Phase gates and numeric completion criteria are tracked in
+`docs/MATURITY_PROGRAM.md`.
+
+## Golden contract
+
+Primary contract for current maturity push:
+
+- Block unauthorized file opens/reads via inode-first enforcement for
+  cgroup-scoped workloads.
+- Provide safe rollback and signed policy provenance for every rollout.
 
 ## Target environment
 - Linux kernel with BTF enabled and `CONFIG_BPF_LSM=y`.
