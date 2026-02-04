@@ -377,6 +377,12 @@ if(BUILD_TESTING)
     )
 
     add_test(
+        NAME phase2_evidence_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase2_evidence_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE2_CORRECTNESS_EVIDENCE.md
+    )
+
+    add_test(
         NAME runbooks_contract
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_runbooks_contract.py
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/runbooks
