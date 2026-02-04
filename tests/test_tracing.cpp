@@ -88,6 +88,19 @@ class DaemonHookGuard {
     }
 };
 
+class BreakGlassHookGuard {
+  public:
+    explicit BreakGlassHookGuard(DetectBreakGlassFn fn)
+    {
+        set_detect_break_glass_for_test(fn);
+    }
+
+    ~BreakGlassHookGuard()
+    {
+        reset_detect_break_glass_for_test();
+    }
+};
+
 Result<void> test_config_ok(const std::string&)
 {
     return {};
@@ -117,6 +130,11 @@ Result<KernelFeatures> test_detect_full()
     features.kernel_minor = 6;
     features.kernel_patch = 0;
     return features;
+}
+
+bool test_break_glass_true()
+{
+    return true;
 }
 
 Result<void> test_memlock_ok()
@@ -281,6 +299,26 @@ TEST(TracingTest, DaemonRunGuardsSigkillBehindBuildAndRuntimeFlags)
 #else
     EXPECT_NE(log.find("SIGKILL enforcement is disabled in this build"), std::string::npos);
 #endif
+}
+
+TEST(TracingTest, DaemonRunForcesAuditOnlyWhenBreakGlassActive)
+{
+    TracingEnvGuard env("1");
+    std::ostringstream output;
+    logger().set_output(&output);
+    logger().set_json_format(true);
+    {
+        BreakGlassHookGuard break_glass(test_break_glass_true);
+        DaemonHookGuard hooks(test_config_ok, test_detect_full, test_memlock_ok, test_load_bpf_fail);
+        int rc = daemon_run(false, false, 0, kEnforceSignalTerm, false, LsmHookMode::FileOpen, 0, 1,
+                            kSigkillEscalationThresholdDefault, kSigkillEscalationWindowSecondsDefault);
+        EXPECT_EQ(rc, 1);
+    }
+    logger().set_output(&std::cerr);
+    logger().set_json_format(false);
+
+    const std::string log = output.str();
+    EXPECT_NE(log.find("Break-glass mode detected - forcing audit-only mode"), std::string::npos);
 }
 
 TEST(TracingTest, DaemonRunMarksRootSpanErrorWhenConfigValidationFails)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Phase-3 operational safety evidence and guardrail tests."""
+"""Validate Phase-3 operational safety evidence and guardrail contracts."""
 
 from __future__ import annotations
 
@@ -17,21 +17,29 @@ def load_tests(path: Path) -> set[str]:
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 6:
         print(
-            "usage: check_phase3_safety_contract.py <phase3-evidence.md> <test-file> [<test-file> ...]",
+            "usage: check_phase3_safety_contract.py "
+            "<phase3-evidence.md> <canary.yml> <go-live-gate.yml> <canary_gate.sh> "
+            "<test-file> [<test-file> ...]",
             file=sys.stderr,
         )
         return 2
 
     doc_path = Path(sys.argv[1])
+    canary_workflow_path = Path(sys.argv[2])
+    go_live_workflow_path = Path(sys.argv[3])
+    canary_gate_path = Path(sys.argv[4])
     doc_text = doc_path.read_text(encoding="utf-8")
     required_doc_snippets = [
         "Phase 3 Operational Safety Evidence",
         "--allow-sigkill",
         "ENABLE_SIGKILL_ENFORCEMENT",
         ".github/workflows/canary.yml",
+        ".github/workflows/go-live-gate.yml",
         "docs/runbooks/RECOVERY_break_glass.md",
+        "ALLOW_SIGKILL_CANARY",
+        "DaemonRunForcesAuditOnlyWhenBreakGlassActive",
         "RollbackControlPathCompletesWithinFiveSecondsUnderLoad",
         ".github/workflows/incident-drill.yml",
     ]
@@ -42,12 +50,32 @@ def main() -> int:
             print(f"  - {item}", file=sys.stderr)
         return 1
 
+    canary_workflow_text = canary_workflow_path.read_text(encoding="utf-8")
+    go_live_workflow_text = go_live_workflow_path.read_text(encoding="utf-8")
+    canary_gate_text = canary_gate_path.read_text(encoding="utf-8")
+
+    workflow_missing: list[str] = []
+    if "ENFORCE_SIGNAL=term" not in canary_workflow_text:
+        workflow_missing.append(f"{canary_workflow_path}: missing 'ENFORCE_SIGNAL=term'")
+    if "ENFORCE_SIGNAL=term" not in go_live_workflow_text:
+        workflow_missing.append(f"{go_live_workflow_path}: missing 'ENFORCE_SIGNAL=term'")
+    if "ALLOW_SIGKILL_CANARY" not in canary_gate_text:
+        workflow_missing.append(f"{canary_gate_path}: missing 'ALLOW_SIGKILL_CANARY'")
+    if "Refusing ENFORCE_SIGNAL=kill" not in canary_gate_text:
+        workflow_missing.append(f"{canary_gate_path}: missing kill-signal guard message")
+
+    if workflow_missing:
+        for item in workflow_missing:
+            print(item, file=sys.stderr)
+        return 1
+
     discovered: set[str] = set()
-    for arg in sys.argv[2:]:
+    for arg in sys.argv[5:]:
         discovered |= load_tests(Path(arg))
 
     required_tests = {
         "TracingTest.DaemonRunGuardsSigkillBehindBuildAndRuntimeFlags",
+        "TracingTest.DaemonRunForcesAuditOnlyWhenBreakGlassActive",
         "PolicyRollbackTest.RollbackControlPathCompletesWithinFiveSecondsUnderLoad",
     }
     missing_tests = sorted(required_tests - discovered)

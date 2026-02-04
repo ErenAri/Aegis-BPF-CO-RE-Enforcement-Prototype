@@ -69,6 +69,8 @@ Definition of done:
 - Safe rollout controls exist: audit-only, canary scope, break-glass.
 - Kill behavior is behind compile-time and runtime gates, default off, and
   rate-limited.
+- Canary workflows enforce staged `ENFORCE_SIGNAL=term`; kill-mode canary is
+  explicitly blocked unless a dedicated override is supplied.
 - Rollback path is load-tested and measured (<5s target for standard policy
   updates).
 - Agent crash behavior and recovery are tested and documented.

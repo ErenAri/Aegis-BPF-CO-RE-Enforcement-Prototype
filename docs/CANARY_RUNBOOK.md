@@ -49,6 +49,12 @@ Collect evidence:
 - blocked-event review (legitimate vs false positive)
 - restart and rollback behavior
 
+Safety guard:
+- `scripts/canary_gate.sh` rejects `ENFORCE_SIGNAL=kill` unless
+  `ALLOW_SIGKILL_CANARY=1` is explicitly set.
+- Treat kill-mode canary as exceptional containment testing only, never as the
+  standard rollout path.
+
 ## Rollback drill
 
 During canary, execute one rollback drill:

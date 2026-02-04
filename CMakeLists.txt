@@ -413,6 +413,9 @@ if(BUILD_TESTING)
         NAME phase3_safety_contract
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase3_safety_contract.py
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE3_OPERATIONAL_SAFETY_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/canary.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/go-live-gate.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/canary_gate.sh
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tracing.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_policy.cpp
     )

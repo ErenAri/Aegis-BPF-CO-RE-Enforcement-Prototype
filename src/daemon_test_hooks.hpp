@@ -10,6 +10,7 @@ class BpfState;
 
 using ValidateConfigDirectoryPermissionsFn = Result<void> (*)(const std::string&);
 using DetectKernelFeaturesFn = Result<KernelFeatures> (*)();
+using DetectBreakGlassFn = bool (*)();
 using BumpMemlockRlimitFn = Result<void> (*)();
 using LoadBpfFn = Result<void> (*)(bool, bool, BpfState&);
 using EnsureLayoutVersionFn = Result<void> (*)(BpfState&);
@@ -22,6 +23,8 @@ void set_validate_config_directory_permissions_for_test(ValidateConfigDirectoryP
 void reset_validate_config_directory_permissions_for_test();
 void set_detect_kernel_features_for_test(DetectKernelFeaturesFn fn);
 void reset_detect_kernel_features_for_test();
+void set_detect_break_glass_for_test(DetectBreakGlassFn fn);
+void reset_detect_break_glass_for_test();
 void set_bump_memlock_rlimit_for_test(BumpMemlockRlimitFn fn);
 void reset_bump_memlock_rlimit_for_test();
 void set_load_bpf_for_test(LoadBpfFn fn);
