@@ -416,6 +416,18 @@ if(BUILD_TESTING)
         COMMAND $<TARGET_FILE:aegisbpf> run --enforce --enforce-signal=bad
     )
     set_tests_properties(cli_run_rejects_invalid_enforce_signal PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_run_rejects_zero_kill_escalation_threshold
+        COMMAND $<TARGET_FILE:aegisbpf> run --enforce --kill-escalation-threshold=0
+    )
+    set_tests_properties(cli_run_rejects_zero_kill_escalation_threshold PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME cli_run_rejects_zero_kill_escalation_window
+        COMMAND $<TARGET_FILE:aegisbpf> run --enforce --kill-escalation-window-seconds=0
+    )
+    set_tests_properties(cli_run_rejects_zero_kill_escalation_window PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # Fuzzing targets

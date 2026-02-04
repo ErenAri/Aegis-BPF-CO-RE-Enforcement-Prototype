@@ -69,6 +69,8 @@ int dispatch_run_command(int argc, char** argv, const char* prog)
     uint8_t enforce_signal = kEnforceSignalTerm;
     uint32_t ringbuf_bytes = 0;
     uint32_t event_sample_rate = 1;
+    uint32_t sigkill_escalation_threshold = kSigkillEscalationThresholdDefault;
+    uint32_t sigkill_escalation_window_seconds = kSigkillEscalationWindowSecondsDefault;
     LsmHookMode lsm_hook = LsmHookMode::FileOpen;
 
     for (int i = 2; i < argc; ++i) {
@@ -125,6 +127,34 @@ int dispatch_run_command(int argc, char** argv, const char* prog)
             if (i + 1 >= argc) return usage(prog);
             if (!parse_enforce_signal_option(argv[++i], enforce_signal)) return 1;
         }
+        else if (arg.rfind("--kill-escalation-threshold=", 0) == 0) {
+            std::string value = arg.substr(std::strlen("--kill-escalation-threshold="));
+            if (!parse_u32_option(value, sigkill_escalation_threshold,
+                                  "Invalid SIGKILL escalation threshold", true)) {
+                return 1;
+            }
+        }
+        else if (arg == "--kill-escalation-threshold") {
+            if (i + 1 >= argc) return usage(prog);
+            if (!parse_u32_option(argv[++i], sigkill_escalation_threshold,
+                                  "Invalid SIGKILL escalation threshold", true)) {
+                return 1;
+            }
+        }
+        else if (arg.rfind("--kill-escalation-window-seconds=", 0) == 0) {
+            std::string value = arg.substr(std::strlen("--kill-escalation-window-seconds="));
+            if (!parse_u32_option(value, sigkill_escalation_window_seconds,
+                                  "Invalid SIGKILL escalation window seconds", true)) {
+                return 1;
+            }
+        }
+        else if (arg == "--kill-escalation-window-seconds") {
+            if (i + 1 >= argc) return usage(prog);
+            if (!parse_u32_option(argv[++i], sigkill_escalation_window_seconds,
+                                  "Invalid SIGKILL escalation window seconds", true)) {
+                return 1;
+            }
+        }
         else if (arg.rfind("--lsm-hook=", 0) == 0) {
             std::string value = arg.substr(std::strlen("--lsm-hook="));
             if (!parse_lsm_hook(value, lsm_hook)) {
@@ -145,7 +175,9 @@ int dispatch_run_command(int argc, char** argv, const char* prog)
         }
     }
 
-    return daemon_run(audit_only, enable_seccomp, deadman_ttl, enforce_signal, lsm_hook, ringbuf_bytes, event_sample_rate);
+    return daemon_run(audit_only, enable_seccomp, deadman_ttl, enforce_signal, lsm_hook,
+                      ringbuf_bytes, event_sample_rate, sigkill_escalation_threshold,
+                      sigkill_escalation_window_seconds);
 }
 
 }  // namespace aegis

@@ -15,6 +15,38 @@ def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def build_validator(schema: dict):
+    # jsonschema<4 does not expose Draft202012Validator. Use the best available
+    # validator for the declared $schema and gracefully fall back if needed.
+    if hasattr(jsonschema, "Draft202012Validator"):
+        return jsonschema.Draft202012Validator(schema)
+
+    validators_mod = getattr(jsonschema, "validators", None)
+    if validators_mod is not None and hasattr(validators_mod, "validator_for"):
+        validator_cls = validators_mod.validator_for(schema)
+        validator_cls.check_schema(schema)
+        if validator_cls.__name__ != "Draft202012Validator":
+            sys.stderr.write(
+                f"warning: using {validator_cls.__name__}; "
+                "Draft 2020-12 validator unavailable in installed jsonschema\n"
+            )
+        return validator_cls(schema)
+
+    for name in ("Draft7Validator", "Draft6Validator", "Draft4Validator"):
+        validator_cls = getattr(jsonschema, name, None)
+        if validator_cls is not None:
+            sys.stderr.write(
+                f"warning: using {name}; "
+                "Draft 2020-12 validator unavailable in installed jsonschema\n"
+            )
+            validator_cls.check_schema(schema)
+            return validator_cls(schema)
+
+    raise RuntimeError(
+        "No suitable jsonschema validator available; install python3-jsonschema>=3.2"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate event samples against schema")
     parser.add_argument("--schema", required=True, help="Path to JSON schema")
@@ -25,7 +57,7 @@ def main() -> int:
     samples_dir = Path(args.samples)
 
     schema = load_json(schema_path)
-    validator = jsonschema.Draft202012Validator(schema)
+    validator = build_validator(schema)
 
     failures = 0
     for sample_path in sorted(samples_dir.glob("*.json")):

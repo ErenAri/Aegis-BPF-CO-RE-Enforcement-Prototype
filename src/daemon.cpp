@@ -152,7 +152,9 @@ int daemon_run(bool audit_only,
                uint8_t enforce_signal,
                LsmHookMode lsm_hook,
                uint32_t ringbuf_bytes,
-               uint32_t event_sample_rate)
+               uint32_t event_sample_rate,
+               uint32_t sigkill_escalation_threshold,
+               uint32_t sigkill_escalation_window_seconds)
 {
     // Check for break-glass mode FIRST
     bool break_glass_active = detect_break_glass();
@@ -168,6 +170,18 @@ int daemon_run(bool audit_only,
         logger().log(SLOG_WARN("Invalid enforce signal configured; using SIGTERM")
                          .field("signal", static_cast<int64_t>(enforce_signal)));
         enforce_signal = kEnforceSignalTerm;
+    }
+    if (sigkill_escalation_threshold == 0) {
+        logger().log(SLOG_WARN("Invalid SIGKILL escalation threshold; using default")
+                         .field("value", static_cast<int64_t>(sigkill_escalation_threshold))
+                         .field("default", static_cast<int64_t>(kSigkillEscalationThresholdDefault)));
+        sigkill_escalation_threshold = kSigkillEscalationThresholdDefault;
+    }
+    if (sigkill_escalation_window_seconds == 0) {
+        logger().log(SLOG_WARN("Invalid SIGKILL escalation window; using default")
+                         .field("value", static_cast<int64_t>(sigkill_escalation_window_seconds))
+                         .field("default", static_cast<int64_t>(kSigkillEscalationWindowSecondsDefault)));
+        sigkill_escalation_window_seconds = kSigkillEscalationWindowSecondsDefault;
     }
 
     // Validate config directory permissions (security check)
@@ -255,6 +269,8 @@ int daemon_run(bool audit_only,
     config.enforce_signal = enforce_signal;
     config.deadman_ttl_seconds = deadman_ttl;
     config.event_sample_rate = event_sample_rate ? event_sample_rate : 1;
+    config.sigkill_escalation_threshold = sigkill_escalation_threshold;
+    config.sigkill_escalation_window_seconds = sigkill_escalation_window_seconds;
     if (config.deadman_enabled) {
         struct timespec ts {};
         clock_gettime(CLOCK_BOOTTIME, &ts);
@@ -317,6 +333,10 @@ int daemon_run(bool audit_only,
                      .field("lsm_hook", lsm_hook_name(lsm_hook))
                      .field("network_enabled", network_enabled)
                      .field("event_sample_rate", static_cast<int64_t>(config.event_sample_rate))
+                     .field("sigkill_escalation_threshold",
+                            static_cast<int64_t>(config.sigkill_escalation_threshold))
+                     .field("sigkill_escalation_window_seconds",
+                            static_cast<int64_t>(config.sigkill_escalation_window_seconds))
                      .field("ringbuf_bytes", static_cast<int64_t>(ringbuf_bytes))
                      .field("seccomp", enable_seccomp)
                      .field("break_glass", break_glass_active)

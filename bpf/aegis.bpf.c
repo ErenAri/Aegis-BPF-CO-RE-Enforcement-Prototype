@@ -34,6 +34,8 @@
 #define MAY_WRITE 0x02
 #define MAY_READ 0x04
 #endif
+#define SIGKILL_ESCALATION_THRESHOLD_DEFAULT 5
+#define SIGKILL_ESCALATION_WINDOW_NS_DEFAULT (30ULL * 1000000000ULL)
 
 /* ============================================================================
  * Type Definitions
@@ -120,6 +122,8 @@ struct agent_config {
     __u64 deadman_deadline_ns;  /* ktime_get_boot_ns() deadline */
     __u32 deadman_ttl_seconds;
     __u32 event_sample_rate;
+    __u32 sigkill_escalation_threshold;  /* SIGKILL after N denies in window */
+    __u32 sigkill_escalation_window_seconds;  /* Escalation window size */
 };
 
 struct agent_meta {
@@ -129,6 +133,12 @@ struct agent_meta {
 struct block_stats_entry {
     __u64 blocks;
     __u64 ringbuf_drops;
+};
+
+struct signal_escalation_state {
+    __u64 window_start_ns;
+    __u32 strikes;
+    __u32 _pad;
 };
 
 /* ============================================================================
@@ -335,6 +345,13 @@ struct {
     __type(value, __u64);
 } net_port_stats SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 65536);
+    __type(key, __u32);
+    __type(value, struct signal_escalation_state);
+} enforce_signal_state SEC(".maps");
+
 /* ============================================================================
  * Helper Functions
  * ============================================================================ */
@@ -466,6 +483,72 @@ static __always_inline void maybe_send_enforce_signal(__u8 signal)
 {
     if (signal != 0)
         bpf_send_signal(signal);
+}
+
+static __always_inline int enforcement_result(void)
+{
+    return get_effective_audit_mode() ? 0 : -EPERM;
+}
+
+static __always_inline __u32 get_sigkill_escalation_threshold(void)
+{
+    __u32 zero = 0;
+    struct agent_config *cfg = bpf_map_lookup_elem(&agent_config_map, &zero);
+    if (!cfg || cfg->sigkill_escalation_threshold == 0)
+        return SIGKILL_ESCALATION_THRESHOLD_DEFAULT;
+    return cfg->sigkill_escalation_threshold;
+}
+
+static __always_inline __u64 get_sigkill_escalation_window_ns(void)
+{
+    __u32 zero = 0;
+    struct agent_config *cfg = bpf_map_lookup_elem(&agent_config_map, &zero);
+    if (!cfg || cfg->sigkill_escalation_window_seconds == 0)
+        return SIGKILL_ESCALATION_WINDOW_NS_DEFAULT;
+    return (__u64)cfg->sigkill_escalation_window_seconds * 1000000000ULL;
+}
+
+static __always_inline __u8 runtime_enforce_signal(
+    __u8 configured_signal, __u32 pid, __u32 threshold, __u64 window_ns)
+{
+    if (configured_signal != SIGKILL)
+        return configured_signal;
+    if (threshold == 0)
+        threshold = SIGKILL_ESCALATION_THRESHOLD_DEFAULT;
+    if (window_ns == 0)
+        window_ns = SIGKILL_ESCALATION_WINDOW_NS_DEFAULT;
+
+    __u64 now = bpf_ktime_get_boot_ns();
+    struct signal_escalation_state *state =
+        bpf_map_lookup_elem(&enforce_signal_state, &pid);
+    if (!state) {
+        struct signal_escalation_state new_state = {
+            .window_start_ns = now,
+            .strikes = 1,
+            ._pad = 0,
+        };
+        bpf_map_update_elem(&enforce_signal_state, &pid, &new_state, BPF_ANY);
+        if (threshold <= 1)
+            return SIGKILL;
+        return SIGTERM;
+    }
+
+    if (now < state->window_start_ns ||
+        (now - state->window_start_ns) > window_ns) {
+        state->window_start_ns = now;
+        state->strikes = 1;
+        if (threshold <= 1)
+            return SIGKILL;
+        return SIGTERM;
+    }
+
+    if (state->strikes < (__u32)-1)
+        state->strikes++;
+
+    if (state->strikes >= threshold)
+        return SIGKILL;
+
+    return SIGTERM;
 }
 
 static __always_inline void set_action_string(char action[8], __u8 audit, __u8 signal)
@@ -705,8 +788,18 @@ int BPF_PROG(handle_file_open, struct file *file)
         return 0;
 
     __u8 audit = get_effective_audit_mode();
-    __u8 enforce_signal = get_effective_enforce_signal();
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u8 enforce_signal = 0;
+    if (!audit) {
+        __u8 configured_signal = get_effective_enforce_signal();
+        if (configured_signal == SIGKILL) {
+            __u32 kill_threshold = get_sigkill_escalation_threshold();
+            __u64 kill_window_ns = get_sigkill_escalation_window_ns();
+            enforce_signal = runtime_enforce_signal(configured_signal, pid, kill_threshold, kill_window_ns);
+        } else {
+            enforce_signal = configured_signal;
+        }
+    }
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
 
@@ -764,8 +857,18 @@ static __always_inline int handle_inode_permission_impl(struct inode *inode, int
         return 0;
 
     __u8 audit = get_effective_audit_mode();
-    __u8 enforce_signal = get_effective_enforce_signal();
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u8 enforce_signal = 0;
+    if (!audit) {
+        __u8 configured_signal = get_effective_enforce_signal();
+        if (configured_signal == SIGKILL) {
+            __u32 kill_threshold = get_sigkill_escalation_threshold();
+            __u64 kill_window_ns = get_sigkill_escalation_window_ns();
+            enforce_signal = runtime_enforce_signal(configured_signal, pid, kill_threshold, kill_window_ns);
+        } else {
+            enforce_signal = configured_signal;
+        }
+    }
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
 
@@ -880,6 +983,7 @@ int handle_exit(struct trace_event_raw_sched_process_template *ctx)
 {
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     bpf_map_delete_elem(&process_tree, &pid);
+    bpf_map_delete_elem(&enforce_signal_state, &pid);
     return 0;
 }
 
@@ -895,31 +999,34 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
         return 0;
     (void)addrlen;
 
-    __u16 family = BPF_CORE_READ(address, sa_family);
-
-    if (family != AF_INET && family != AF_INET6)
-        return 0;
-
     __u64 cgid = bpf_get_current_cgroup_id();
 
     /* Skip allowed cgroups */
     if (is_cgroup_allowed(cgid))
         return 0;
 
+    __u16 family = 0;
+    if (bpf_probe_read_kernel(&family, sizeof(family), &address->sa_family))
+        return enforcement_result();
+
+    if (family != AF_INET && family != AF_INET6)
+        return 0;
+
     __be32 remote_ip_v4 = 0;
     struct ipv6_key remote_ip_v6 = {};
     __u16 remote_port = 0;
     if (family == AF_INET) {
-        struct sockaddr_in *sin = (struct sockaddr_in *)address;
-        remote_ip_v4 = BPF_CORE_READ(sin, sin_addr.s_addr);
-        __u16 remote_port_be = BPF_CORE_READ(sin, sin_port);
-        remote_port = bpf_ntohs(remote_port_be);
+        struct sockaddr_in sin = {};
+        if (bpf_probe_read_kernel(&sin, sizeof(sin), address))
+            return enforcement_result();
+        remote_ip_v4 = sin.sin_addr.s_addr;
+        remote_port = bpf_ntohs(sin.sin_port);
     } else {
-        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)address;
-        __u16 remote_port_be = BPF_CORE_READ(sin6, sin6_port);
-        remote_port = bpf_ntohs(remote_port_be);
-        if (bpf_probe_read_kernel(remote_ip_v6.addr, sizeof(remote_ip_v6.addr), &sin6->sin6_addr))
-            return 0;
+        struct sockaddr_in6 sin6 = {};
+        if (bpf_probe_read_kernel(&sin6, sizeof(sin6), address))
+            return enforcement_result();
+        remote_port = bpf_ntohs(sin6.sin6_port);
+        __builtin_memcpy(remote_ip_v6.addr, &sin6.sin6_addr, sizeof(remote_ip_v6.addr));
     }
 
     /* Get socket protocol */
@@ -986,8 +1093,18 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
 
     /* Rule matched - process denial */
     __u8 audit = get_effective_audit_mode();
-    __u8 enforce_signal = get_effective_enforce_signal();
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u8 enforce_signal = 0;
+    if (!audit) {
+        __u8 configured_signal = get_effective_enforce_signal();
+        if (configured_signal == SIGKILL) {
+            __u32 kill_threshold = get_sigkill_escalation_threshold();
+            __u64 kill_window_ns = get_sigkill_escalation_window_ns();
+            enforce_signal = runtime_enforce_signal(configured_signal, pid, kill_threshold, kill_window_ns);
+        } else {
+            enforce_signal = configured_signal;
+        }
+    }
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
 
@@ -1037,27 +1154,31 @@ int BPF_PROG(handle_socket_bind, struct socket *sock,
         return 0;
     (void)addrlen;
 
-    __u16 family = BPF_CORE_READ(address, sa_family);
-
-    if (family != AF_INET && family != AF_INET6)
-        return 0;
-
     __u64 cgid = bpf_get_current_cgroup_id();
 
     /* Skip allowed cgroups */
     if (is_cgroup_allowed(cgid))
         return 0;
 
+    __u16 family = 0;
+    if (bpf_probe_read_kernel(&family, sizeof(family), &address->sa_family))
+        return enforcement_result();
+
+    if (family != AF_INET && family != AF_INET6)
+        return 0;
+
     /* Extract bind port */
     __u16 bind_port = 0;
     if (family == AF_INET) {
-        struct sockaddr_in *sin = (struct sockaddr_in *)address;
-        __u16 bind_port_be = BPF_CORE_READ(sin, sin_port);
-        bind_port = bpf_ntohs(bind_port_be);
+        struct sockaddr_in sin = {};
+        if (bpf_probe_read_kernel(&sin, sizeof(sin), address))
+            return enforcement_result();
+        bind_port = bpf_ntohs(sin.sin_port);
     } else {
-        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)address;
-        __u16 bind_port_be = BPF_CORE_READ(sin6, sin6_port);
-        bind_port = bpf_ntohs(bind_port_be);
+        struct sockaddr_in6 sin6 = {};
+        if (bpf_probe_read_kernel(&sin6, sizeof(sin6), address))
+            return enforcement_result();
+        bind_port = bpf_ntohs(sin6.sin6_port);
     }
 
     /* Get socket protocol */
@@ -1071,8 +1192,18 @@ int BPF_PROG(handle_socket_bind, struct socket *sock,
 
     /* Rule matched - process denial */
     __u8 audit = get_effective_audit_mode();
-    __u8 enforce_signal = get_effective_enforce_signal();
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u8 enforce_signal = 0;
+    if (!audit) {
+        __u8 configured_signal = get_effective_enforce_signal();
+        if (configured_signal == SIGKILL) {
+            __u32 kill_threshold = get_sigkill_escalation_threshold();
+            __u64 kill_window_ns = get_sigkill_escalation_window_ns();
+            enforce_signal = runtime_enforce_signal(configured_signal, pid, kill_threshold, kill_window_ns);
+        } else {
+            enforce_signal = configured_signal;
+        }
+    }
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
 

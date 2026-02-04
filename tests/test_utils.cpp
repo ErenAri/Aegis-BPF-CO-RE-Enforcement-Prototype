@@ -308,11 +308,18 @@ TEST(ValidateFilePermissionsTest, RegularFilePasses)
         ASSERT_TRUE(out.is_open());
         out << "data";
     }
+    std::error_code ec;
+    std::filesystem::permissions(file,
+                                 std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write |
+                                     std::filesystem::perms::group_read |
+                                     std::filesystem::perms::others_read,
+                                 std::filesystem::perm_options::replace, ec);
+    ASSERT_FALSE(ec);
 
     auto result = validate_file_permissions(file.string(), false);
     EXPECT_TRUE(result);
 
-    std::error_code ec;
     std::filesystem::remove(file, ec);
 }
 

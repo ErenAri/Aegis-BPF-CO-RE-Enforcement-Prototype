@@ -91,18 +91,23 @@ TEST(CmdPolicySignTest, CreatesSignedBundle)
     auto policy_path = temp_dir.path() / "policy.conf";
     auto key_path = temp_dir.path() / "private.key";
     auto output_path = temp_dir.path() / "policy.signed";
+    auto version_counter_path = temp_dir.path() / "version_counter";
 
     {
         std::ofstream policy_out(policy_path);
         ASSERT_TRUE(policy_out.is_open());
         policy_out << "version=1\n\n[deny_path]\n/etc/passwd\n";
     }
+    ASSERT_EQ(::chmod(policy_path.c_str(), 0644), 0);
 
     {
         std::ofstream key_out(key_path);
         ASSERT_TRUE(key_out.is_open());
         key_out << secret_key_hex(secret_key) << "\n";
     }
+    ASSERT_EQ(::chmod(key_path.c_str(), 0644), 0);
+
+    ScopedEnvVar counter_env("AEGIS_VERSION_COUNTER_PATH", version_counter_path.string());
 
     EXPECT_EQ(cmd_policy_sign(policy_path.string(), key_path.string(), output_path.string()), 0);
 
@@ -129,12 +134,14 @@ TEST(CmdPolicySignTest, RejectsInvalidKeyEncoding)
         ASSERT_TRUE(policy_out.is_open());
         policy_out << "version=1\n";
     }
+    ASSERT_EQ(::chmod(policy_path.c_str(), 0644), 0);
 
     {
         std::ofstream key_out(key_path);
         ASSERT_TRUE(key_out.is_open());
         key_out << std::string(128, 'g') << "\n";
     }
+    ASSERT_EQ(::chmod(key_path.c_str(), 0644), 0);
 
     EXPECT_EQ(cmd_policy_sign(policy_path.string(), key_path.string(), output_path.string()), 1);
 }
@@ -148,6 +155,7 @@ TEST(CmdPolicyApplySignedTest, RequireSignatureRejectsUnsignedPolicy)
         ASSERT_TRUE(policy_out.is_open());
         policy_out << "version=1\n";
     }
+    ASSERT_EQ(::chmod(policy_path.c_str(), 0644), 0);
 
     EXPECT_EQ(cmd_policy_apply_signed(policy_path.string(), true), 1);
 }
@@ -188,6 +196,7 @@ TEST(CmdPolicyApplySignedTest, RejectsRollbackBundleVersion)
         ASSERT_TRUE(key_out.is_open());
         key_out << encode_hex(public_key) << "\n";
     }
+    ASSERT_EQ(::chmod((keys_dir / "trusted.pub").c_str(), 0644), 0);
 
     auto bundle_result = create_signed_bundle("version=1\n", secret_key, 5, 0);
     ASSERT_TRUE(bundle_result);
@@ -196,6 +205,7 @@ TEST(CmdPolicyApplySignedTest, RejectsRollbackBundleVersion)
         ASSERT_TRUE(bundle_out.is_open());
         bundle_out << *bundle_result;
     }
+    ASSERT_EQ(::chmod(bundle_path.c_str(), 0644), 0);
 
     ScopedEnvVar keys_env("AEGIS_KEYS_DIR", keys_dir.string());
     ScopedEnvVar counter_env("AEGIS_VERSION_COUNTER_PATH", version_counter_path.string());

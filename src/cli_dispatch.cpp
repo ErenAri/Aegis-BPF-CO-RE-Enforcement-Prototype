@@ -109,7 +109,8 @@ int dispatch_cli(int argc, char** argv)
     configure_logging_from_args(argc, argv);
 
     if (argc == 1) {
-        return daemon_run(false, false, 0, kEnforceSignalTerm, LsmHookMode::FileOpen, 0, 1);
+        return daemon_run(false, false, 0, kEnforceSignalTerm, LsmHookMode::FileOpen, 0, 1,
+                          kSigkillEscalationThresholdDefault, kSigkillEscalationWindowSecondsDefault);
     }
 
     std::string cmd = argv[1];

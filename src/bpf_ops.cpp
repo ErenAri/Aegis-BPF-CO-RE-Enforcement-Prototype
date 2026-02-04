@@ -691,6 +691,9 @@ Result<void> set_agent_config(BpfState& state, bool audit_only)
     AgentConfig cfg{};
     cfg.audit_only = audit_only ? 1 : 0;
     cfg.enforce_signal = kEnforceSignalTerm;
+    cfg.event_sample_rate = 1;
+    cfg.sigkill_escalation_threshold = kSigkillEscalationThresholdDefault;
+    cfg.sigkill_escalation_window_seconds = kSigkillEscalationWindowSecondsDefault;
     if (bpf_map_update_elem(bpf_map__fd(state.config_map), &key, &cfg, BPF_ANY)) {
         return Error::system(errno, "Failed to configure BPF audit mode");
     }
@@ -846,8 +849,19 @@ Result<void> set_agent_config_full(BpfState& state, const AgentConfig& config)
         return Error(ErrorCode::BpfMapOperationFailed, "Config map not found");
     }
 
+    AgentConfig normalized = config;
+    if (normalized.event_sample_rate == 0) {
+        normalized.event_sample_rate = 1;
+    }
+    if (normalized.sigkill_escalation_threshold == 0) {
+        normalized.sigkill_escalation_threshold = kSigkillEscalationThresholdDefault;
+    }
+    if (normalized.sigkill_escalation_window_seconds == 0) {
+        normalized.sigkill_escalation_window_seconds = kSigkillEscalationWindowSecondsDefault;
+    }
+
     uint32_t key = 0;
-    if (bpf_map_update_elem(bpf_map__fd(state.config_map), &key, &config, BPF_ANY)) {
+    if (bpf_map_update_elem(bpf_map__fd(state.config_map), &key, &normalized, BPF_ANY)) {
         return Error::system(errno, "Failed to configure BPF agent config");
     }
     return {};
@@ -865,7 +879,13 @@ Result<void> update_deadman_deadline(BpfState& state, uint64_t deadline_ns)
 
     // Read current config
     if (bpf_map_lookup_elem(fd, &key, &cfg)) {
-        return Error::system(errno, "Failed to read agent config");
+        if (errno != ENOENT) {
+            return Error::system(errno, "Failed to read agent config");
+        }
+        cfg.enforce_signal = kEnforceSignalTerm;
+        cfg.event_sample_rate = 1;
+        cfg.sigkill_escalation_threshold = kSigkillEscalationThresholdDefault;
+        cfg.sigkill_escalation_window_seconds = kSigkillEscalationWindowSecondsDefault;
     }
 
     // Update deadline

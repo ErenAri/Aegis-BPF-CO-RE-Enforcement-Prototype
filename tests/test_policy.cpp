@@ -358,6 +358,15 @@ class PolicyRollbackTest : public ::testing::Test {
         std::filesystem::path file = test_dir_ / name;
         std::ofstream out(file);
         out << content;
+        std::error_code ec;
+        std::filesystem::permissions(file,
+                                     std::filesystem::perms::owner_read |
+                                         std::filesystem::perms::owner_write |
+                                         std::filesystem::perms::group_read |
+                                         std::filesystem::perms::others_read,
+                                     std::filesystem::perm_options::replace,
+                                     ec);
+        EXPECT_FALSE(ec);
         return file.string();
     }
 

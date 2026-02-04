@@ -49,6 +49,8 @@ inline constexpr uint8_t kEnforceSignalNone = 0;
 inline constexpr uint8_t kEnforceSignalInt = 2;
 inline constexpr uint8_t kEnforceSignalKill = 9;
 inline constexpr uint8_t kEnforceSignalTerm = 15;
+inline constexpr uint32_t kSigkillEscalationThresholdDefault = 5;
+inline constexpr uint32_t kSigkillEscalationWindowSecondsDefault = 30;
 
 enum EventType : uint32_t {
     EVENT_EXEC = 1,
@@ -216,6 +218,8 @@ struct AgentConfig {
     uint64_t deadman_deadline_ns;
     uint32_t deadman_ttl_seconds;
     uint32_t event_sample_rate;
+    uint32_t sigkill_escalation_threshold;      /* SIGKILL after N denies in window */
+    uint32_t sigkill_escalation_window_seconds; /* Escalation window size */
 };
 
 struct AgentMeta {

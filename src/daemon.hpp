@@ -26,6 +26,8 @@ int daemon_run(bool audit_only,
                uint8_t enforce_signal,
                LsmHookMode lsm_hook,
                uint32_t ringbuf_bytes,
-               uint32_t event_sample_rate);
+               uint32_t event_sample_rate,
+               uint32_t sigkill_escalation_threshold,
+               uint32_t sigkill_escalation_window_seconds);
 
 }  // namespace aegis

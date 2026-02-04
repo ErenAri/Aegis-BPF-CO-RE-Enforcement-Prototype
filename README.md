@@ -134,6 +134,14 @@ sudo ./build/aegisbpf run --enforce
 # Enforce mode with explicit signal policy (default is SIGTERM)
 sudo ./build/aegisbpf run --enforce --enforce-signal=term
 
+# SIGKILL mode escalates: TERM first, KILL only after repeated denies
+sudo ./build/aegisbpf run --enforce --enforce-signal=kill
+
+# Tune SIGKILL escalation policy (used only with --enforce-signal=kill)
+sudo ./build/aegisbpf run --enforce --enforce-signal=kill \
+  --kill-escalation-threshold=8 \
+  --kill-escalation-window-seconds=60
+
 # With JSON logging
 sudo ./build/aegisbpf run --log-format=json
 
@@ -189,6 +197,13 @@ sudo aegisbpf run --enforce --lsm-hook=both
 # Choose enforce signal action (default: term)
 sudo aegisbpf run --enforce --enforce-signal=term
 sudo aegisbpf run --enforce --enforce-signal=none
+# 'kill' escalates to SIGKILL only after repeated denies in a short window
+sudo aegisbpf run --enforce --enforce-signal=kill
+
+# Tune escalation policy for kill mode
+sudo aegisbpf run --enforce --enforce-signal=kill \
+  --kill-escalation-threshold=8 \
+  --kill-escalation-window-seconds=60
 
 # Increase ring buffer size (bytes) to reduce ringbuf drops
 sudo aegisbpf run --audit --ringbuf-bytes=67108864
