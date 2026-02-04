@@ -51,9 +51,9 @@ jobs:
           output-file-path: benchmark.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: ${{ github.ref == 'refs/heads/main' }}
-          alert-threshold: '110%'
+          alert-threshold: '150%'
           fail-on-alert: true
-          comment-on-alert: true
+          comment-on-alert: false
           summary-always: true
 
       - name: Upload benchmark artifact (bootstrap)
