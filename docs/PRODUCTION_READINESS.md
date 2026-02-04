@@ -63,6 +63,7 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Soak reliability workflow: `.github/workflows/soak.yml` + `scripts/soak_reliability.sh`
 - Staging canary workflow: `.github/workflows/canary.yml` + `scripts/canary_gate.sh`
 - Perf regression workflow: `.github/workflows/perf.yml`
+- Hosted benchmark trend workflow (advisory): `.github/workflows/benchmark.yml`
 - Kernel matrix workflow: `.github/workflows/kernel-matrix.yml`
 - Nightly fuzz workflow: `.github/workflows/nightly-fuzz.yml`
 - Parser-change fuzz gate: `parser-fuzz` job in `.github/workflows/ci.yml` + `scripts/run_parser_fuzz_changed.sh`
