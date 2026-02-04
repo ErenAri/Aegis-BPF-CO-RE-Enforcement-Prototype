@@ -48,6 +48,39 @@ Linux host, while producing usable audit evidence for incident response.
 | Inbound accept/listen/sendmsg | No | Currently out of scope |
 | Non-LSM kernel paths | Partial | Depends on available hooks |
 
+### Syscall path coverage boundaries
+
+This release treats file enforcement coverage as limited to LSM-backed open
+permission paths:
+
+| Path | Contract status | Notes |
+|---|---|---|
+| `open` / `openat` / `openat2` | In scope | Covered via LSM permission hooks, not by tracepoints alone |
+| `execve` | Partial | File access policy still enforced via inode checks; process-exec telemetry is audit signal |
+| `mmap` executable mapping | Partial | Depends on kernel hook behavior and file-open path leading to mapping |
+| `socket_connect` / `socket_bind` | In scope for network deny policy | Rule types documented in `docs/POLICY_SEMANTICS.md` |
+| `accept` / `listen` / `sendmsg` | Out of scope | No block guarantees in this release |
+
+### Filesystem caveats
+
+- ext4/xfs are the primary validated filesystems for enforcement semantics.
+- OverlayFS is supported with caveats: upper/lower inode behavior can differ
+  from single-layer filesystems.
+- Bind mounts may present the same inode under multiple paths; inode deny still
+  applies, path telemetry can differ.
+- Network/distributed filesystems (for example NFS/FUSE variants) are not a
+  primary guarantee surface in this release.
+
+### Container and orchestration caveats
+
+- Mount namespaces can cause path-view differences between the agent and target
+  workloads; inode enforcement remains the primary invariant.
+- User namespaces are treated as a bypass-risk amplifier when combined with
+  privileged runtime configuration.
+- Privileged Kubernetes pods (`privileged: true`, broad host namespace/device
+  access, or equivalent host-level capability) are outside the default trust
+  boundary and must be treated as high-risk exceptions.
+
 ## Known blind spots and bypass surface
 
 ### Namespaces and mounts
@@ -69,6 +102,15 @@ Linux host, while producing usable audit evidence for incident response.
 - Privileged workloads (`CAP_SYS_ADMIN`/equivalent) can undermine host
   controls; treat as trust boundary breach.
 - If BPF LSM is unavailable, enforcement degrades to audit-only.
+
+### Accepted vs non-accepted bypasses
+
+| Case | Status | Required handling |
+|---|---|---|
+| `allow_cgroup` exemption | Accepted (explicit) | Change-controlled, audited, short-lived where possible |
+| Break-glass mode | Accepted (explicit emergency control) | Incident ticket + postmortem + mandatory rollback |
+| Host root or kernel compromise | Not accepted (out of scope) | Treat as full trust-boundary failure |
+| Privileged orchestrator workloads bypassing host controls | Not accepted for core guarantee | Scope as exception, not as protected workload |
 
 ## Security guarantees (when prerequisites hold)
 

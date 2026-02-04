@@ -48,6 +48,8 @@ Definition of done:
 - Policy semantics spec defines precedence, inode/path behavior, and namespace
   caveats.
 - Claim taxonomy is documented and applied to user-facing feature statements.
+- Evidence pack exists at `docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md` and is
+  enforced by `phase1_product_contract`.
 
 ## Phase 2: Correctness proof
 

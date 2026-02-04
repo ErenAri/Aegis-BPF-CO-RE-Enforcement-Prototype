@@ -27,6 +27,28 @@ In fallback tracepoint mode:
 - `deny_path_map` is checked on `openat` events for audit only.
 - No kernel block is possible in this path.
 
+## Deterministic precedence and conflict resolution
+
+File-path precedence (highest to lowest):
+1. Survival allowlist entry for the current inode -> allow
+2. `allow_cgroup` match -> allow
+3. `deny_inode` / inode-derived deny from `deny_path` -> deny in enforce mode
+4. No deny match -> allow
+
+Network-path precedence:
+1. `allow_cgroup` match -> allow (intentional bypass control)
+2. Exact IP deny -> deny
+3. CIDR deny -> deny
+4. Port deny -> deny
+5. No deny match -> allow
+
+Conflict handling:
+- Duplicate deny entries are de-duplicated by map key identity.
+- `deny_path` and `deny_inode` converge to the same inode deny key when they
+  refer to the same object.
+- `allow_cgroup` always has explicit precedence over deny rules by design; this
+  is security-sensitive and must be tightly controlled.
+
 ## Path rule normalization
 
 When applying `deny_path` rules:
@@ -47,6 +69,8 @@ audit fallback and operator readability.
 - Survive rename and hard-link changes.
 - Are independent of textual path.
 - Can be affected by inode reuse after file deletion/recreation.
+- May appear under multiple path views (bind mounts, container mount
+  namespaces) while still enforcing on the same inode identity.
 
 ## Cgroup allow semantics
 
@@ -96,6 +120,17 @@ For signed policies:
 | Mount namespace path drift | Policy apply canonicalization uses agent namespace view |
 | Inode reused after delete/recreate | Old deny entry may no longer map to intended object |
 | No BPF LSM | Audit-only fallback (no block) |
+
+## Namespace and mount consistency contract
+
+- Policy canonicalization is resolved from the agent's mount namespace at apply
+  time.
+- Enforcement guarantee is inode-based, not path-string-based.
+- Container/user namespace path differences do not change inode deny decisions,
+  but they can change operator-facing telemetry paths.
+- For Kubernetes/containers using bind mounts or overlay layers, treat inode
+  rules as authoritative and path rules as operator convenience + fallback
+  audit signal.
 
 ## Authoring guidance
 

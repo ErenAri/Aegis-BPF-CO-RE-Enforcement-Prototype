@@ -391,6 +391,16 @@ if(BUILD_TESTING)
     )
 
     add_test(
+        NAME phase1_product_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase1_product_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/THREAT_MODEL.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/POLICY_SEMANTICS.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/MATURITY_PROGRAM.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/README.md
+    )
+
+    add_test(
         NAME phase2_evidence_contract
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase2_evidence_contract.py
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE2_CORRECTNESS_EVIDENCE.md

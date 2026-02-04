@@ -81,6 +81,7 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Policy runtime semantics: `docs/POLICY_SEMANTICS.md`
 - Metrics interpretation guide: `docs/METRICS_OPERATIONS.md`
 - Maturity phase gates and done criteria: `docs/MATURITY_PROGRAM.md`
+- Phase-1 product-contract evidence pack: `docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md`
 - Phase-2 correctness evidence pack: `docs/PHASE2_CORRECTNESS_EVIDENCE.md`
 - Phase-3 operational safety evidence pack: `docs/PHASE3_OPERATIONAL_SAFETY_EVIDENCE.md`
 - Phase-4 portability evidence pack: `docs/PHASE4_PORTABILITY_EVIDENCE.md`
