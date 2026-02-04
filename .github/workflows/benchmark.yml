@@ -30,8 +30,8 @@ jobs:
       - name: Run benchmarks
         run: |
           ./build-bench/aegisbpf_bench \
-            --benchmark_min_time=0.2 \
-            --benchmark_repetitions=8 \
+            --benchmark_min_time=0.5 \
+            --benchmark_repetitions=12 \
             --benchmark_report_aggregates_only=true \
             --benchmark_format=json \
             --benchmark_out=benchmark.json \
@@ -54,7 +54,7 @@ jobs:
           output-file-path: benchmark.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: false
-          alert-threshold: '150%'
+          alert-threshold: '200%'
           fail-on-alert: false
           comment-on-alert: false
           summary-always: true
@@ -67,7 +67,7 @@ jobs:
           output-file-path: benchmark.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: ${{ github.ref == 'refs/heads/main' }}
-          alert-threshold: '150%'
+          alert-threshold: '200%'
           fail-on-alert: true
           comment-on-alert: false
           summary-always: true

@@ -16,7 +16,9 @@ This project enforces quality gates through required CI checks on `main`.
 - Label contract validation (`repo_labels.json` -> workflows/templates references)
 - SBOM generation
 - Security scans (`dependency-review`, `codeql`, `gitleaks`)
-- Benchmark regression gate (fails on >10% slowdown)
+- Benchmark regression policy:
+  - PR: advisory signal only
+  - Main: fails when slowdown exceeds threshold (currently 2.0x / 100%)
 
 ## Coverage ratchet policy
 

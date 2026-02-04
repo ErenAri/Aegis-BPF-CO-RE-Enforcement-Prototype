@@ -96,9 +96,21 @@ def discover_contexts() -> tuple[set[str], set[str]]:
         if not isinstance(data, dict):
             continue
         workflow_name = data.get("name")
+        on_value = data.get("on")
+        # PyYAML can parse bare `on:` as boolean `True` in YAML 1.1 mode.
+        if on_value is None and True in data:
+            on_value = data.get(True)
         jobs = data.get("jobs")
         if not isinstance(workflow_name, str) or not isinstance(jobs, dict):
             continue
+
+        events: set[str] = set()
+        if isinstance(on_value, str):
+            events.add(on_value)
+        elif isinstance(on_value, list):
+            events.update(str(item) for item in on_value)
+        elif isinstance(on_value, dict):
+            events.update(str(item) for item in on_value.keys())
 
         for job_id, job in jobs.items():
             if not isinstance(job, dict):
@@ -108,7 +120,11 @@ def discover_contexts() -> tuple[set[str], set[str]]:
             for row in rows:
                 job_name = expand_job_name(name_template, row)
                 job_names.add(job_name)
-                contexts.add(f"{workflow_name} / {job_name}")
+                context = f"{workflow_name} / {job_name}"
+                contexts.add(context)
+                for event in events:
+                    contexts.add(f"{context} ({event})")
+                    job_names.add(f"{job_name} ({event})")
 
     return contexts, job_names
 
