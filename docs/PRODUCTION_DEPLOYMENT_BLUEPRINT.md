@@ -37,6 +37,10 @@ and verifiable observability.
 2. Canary cgroups only (allowlist controlled workloads first).
 3. Expand allowlist-based rollout to full fleet.
 
+Dry-run traces:
+- Run audit-only with JSON logs: `aegisbpf run --audit --log-format=json`.
+- Use `aegisbpf explain` on captured events for best-effort decision traces.
+
 ### Rollback
 - `aegisbpf policy rollback` is the primary rollback lever.
 - Break-glass: create `/etc/aegisbpf/break_glass` to force audit-only.
