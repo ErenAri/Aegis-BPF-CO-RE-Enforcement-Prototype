@@ -471,6 +471,17 @@ if(BUILD_TESTING)
     )
 
     add_test(
+        NAME market_leadership_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_market_leadership_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/MARKET_LEADERSHIP_PLAN.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/MARKET_SCORECARD.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/MATURITY_PROGRAM.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/GO_LIVE_CHECKLIST.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/PULL_REQUEST_TEMPLATE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/README.md
+    )
+
+    add_test(
         NAME runbooks_contract
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_runbooks_contract.py
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/runbooks

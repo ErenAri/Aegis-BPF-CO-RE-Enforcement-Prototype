@@ -71,6 +71,8 @@ or incident ticket) rather than free-form notes.
   - Evidence:
 - [ ] `Go-Live Gate` workflow artifact bundle generated
   - Evidence:
+- [ ] Market leadership scorecard completed (`docs/MARKET_SCORECARD.md`)
+  - Evidence:
 
 ## 5) Operational readiness
 

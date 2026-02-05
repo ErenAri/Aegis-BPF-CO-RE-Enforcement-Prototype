@@ -121,3 +121,23 @@ Evidence bundle: `docs/PHASE7_REVIEWABILITY_EVIDENCE.md`.
 
 This program depends on deterministic privileged test infrastructure.
 Implementation details live in `docs/CI_EXECUTION_STRATEGY.md`.
+
+## Super-phase execution overlay
+
+For market-leadership execution, the phase gates above are grouped into three
+delivery tracks:
+
+- **Super-Phase A (Defensibility Core):** contract semantics + kernel
+  correctness + verifier robustness
+- **Super-Phase B (Production Survivability):** safe operations + degraded-mode
+  behavior + performance/reliability
+- **Super-Phase C (Trust and Adoption):** supply-chain trust + explainability +
+  deployment hardening + external validation
+
+Detailed execution plan:
+
+- `docs/MARKET_LEADERSHIP_PLAN.md`
+
+Release-go/no-go scorecard:
+
+- `docs/MARKET_SCORECARD.md`

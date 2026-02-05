@@ -58,6 +58,8 @@ Current flagship contract (`docs/MATURITY_PROGRAM.md`):
 > cgroup-scoped workloads, with safe rollback and signed policy provenance.
 
 Phase-1 contract evidence: `docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md`.
+Market-leadership execution plan: `docs/MARKET_LEADERSHIP_PLAN.md`.
+Market-leadership release scorecard: `docs/MARKET_SCORECARD.md`.
 
 Current scope labels:
 - `ENFORCED`: file deny via LSM (`file_open` / `inode_permission`), network
