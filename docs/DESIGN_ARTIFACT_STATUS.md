@@ -24,6 +24,8 @@ This page tracks synchronization status between active markdown specs in
 Before a release candidate:
 
 1. Regenerate the PDF from current markdown architecture docs.
+   - Command: `scripts/generate_design_pdf.sh`
+   - Sources: `docs/DESIGN_PDF_SOURCES.md`
 2. Add generation metadata in the PDF cover page:
    - date (UTC)
    - git commit SHA
