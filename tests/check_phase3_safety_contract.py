@@ -40,6 +40,7 @@ def main() -> int:
         "docs/runbooks/RECOVERY_break_glass.md",
         "ALLOW_SIGKILL_CANARY",
         "DaemonRunForcesAuditOnlyWhenBreakGlassActive",
+        "Attach contract validation failed",
         "RollbackControlPathCompletesWithinFiveSecondsUnderLoad",
         ".github/workflows/incident-drill.yml",
     ]
@@ -76,6 +77,7 @@ def main() -> int:
     required_tests = {
         "TracingTest.DaemonRunGuardsSigkillBehindBuildAndRuntimeFlags",
         "TracingTest.DaemonRunForcesAuditOnlyWhenBreakGlassActive",
+        "TracingTest.DaemonRunRejectsSilentPartialAttachContract",
         "PolicyRollbackTest.RollbackControlPathCompletesWithinFiveSecondsUnderLoad",
     }
     missing_tests = sorted(required_tests - discovered)
