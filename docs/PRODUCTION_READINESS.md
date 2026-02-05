@@ -50,6 +50,7 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Enforce smoke test: `scripts/smoke_enforce.sh`
 - Audit smoke test: `scripts/smoke_audit.sh`
 - Audit fallback smoke test: `scripts/smoke_audit_fallback.sh`
+- Reference enforcement slice: `scripts/reference_enforcement_slice.sh`
 - Environment verification: `scripts/verify_env.sh [--strict]`
 - Event schema validation: `scripts/validate_event_schema.py` + `tests/event_samples/`
 - Failure-mode regression contract: `tests/check_failure_modes_contract.py` (parser, signature, map-full, verifier, rollback paths)

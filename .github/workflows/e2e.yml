@@ -45,13 +45,20 @@ jobs:
       - name: E2E bypass tests
         run: sudo ./build/aegisbpf_bypass_test
 
-      - name: E2E file enforcement matrix (60+ checks)
+      - name: E2E file enforcement matrix (100+ checks)
         run: |
           sudo env PRESERVE_TMP_ON_FAIL=1 SUMMARY_OUT=/tmp/e2e-matrix-summary.json \
             ./scripts/e2e_file_enforcement_matrix.sh
           sudo cp /tmp/e2e-matrix-summary.json ./e2e-matrix-summary.json
           sudo chown "$USER:$USER" ./e2e-matrix-summary.json
           python3 scripts/validate_e2e_matrix_summary.py ./e2e-matrix-summary.json --min-total-checks 100 --max-failed-checks 0
+
+      - name: Reference enforcement slice
+        run: |
+          sudo env PRESERVE_TMP_ON_FAIL=1 SUMMARY_OUT=/tmp/reference-slice-summary.json \
+            ./scripts/reference_enforcement_slice.sh
+          sudo cp /tmp/reference-slice-summary.json ./reference-slice-summary.json
+          sudo chown "$USER:$USER" ./reference-slice-summary.json
 
       - name: Collect environment metadata
         if: always()
@@ -115,6 +122,7 @@ jobs:
           name: e2e-matrix-artifacts
           path: |
             e2e-matrix-summary.json
+            reference-slice-summary.json
             compatibility-evidence-e2e.md
             kernel-info.txt
             fs-type.txt

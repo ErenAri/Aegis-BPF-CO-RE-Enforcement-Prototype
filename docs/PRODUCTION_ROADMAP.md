@@ -162,6 +162,8 @@ One inode-first deny path is designated as the decision-grade reference.
 It must pass all Phase A/B gates and an independent review before any
 expansion of enforcement scope.
 
+Canonical reference: `docs/REFERENCE_ENFORCEMENT_SLICE.md`.
+
 ## Differentiation Commitment
 
 At least one adoption KPI must improve by >= Z% vs baseline before any

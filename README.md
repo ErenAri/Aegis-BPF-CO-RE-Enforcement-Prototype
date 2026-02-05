@@ -68,6 +68,7 @@ Design artifact sync status (including root PDF): `docs/DESIGN_ARTIFACT_STATUS.m
 Threat model: `docs/THREAT_MODEL.md`.
 Policy semantics: `docs/POLICY_SEMANTICS.md`.
 Bypass catalog: `docs/BYPASS_CATALOG.md`.
+Reference enforcement slice: `docs/REFERENCE_ENFORCEMENT_SLICE.md`.
 
 Current scope labels:
 - `ENFORCED`: file deny via LSM (`file_open` / `inode_permission`), network
