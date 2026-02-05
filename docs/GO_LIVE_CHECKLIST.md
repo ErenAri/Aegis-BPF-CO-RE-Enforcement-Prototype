@@ -39,7 +39,7 @@ or incident ticket) rather than free-form notes.
   - Evidence:
 - [ ] Enforce canary passed (`PHASE=enforce`, `ENFORCE_SIGNAL=term`)
   - Evidence:
-- [ ] Soak reliability thresholds met (ringbuf drops and RSS growth)
+- [ ] Soak reliability thresholds met (ringbuf drops, drop ratio `<0.1%`, RSS growth)
   - Evidence:
 - [ ] False-positive review completed with security/SRE sign-off
   - Evidence:
@@ -80,9 +80,9 @@ or incident ticket) rather than free-form notes.
   - Evidence:
 - [ ] Key rotation drill passed (`scripts/key_rotation_drill.sh`)
   - Evidence:
-- [ ] Independent security review findings triaged (`docs/EXTERNAL_REVIEW_PREP.md`)
+- [ ] Independent security review findings closed/triaged (`docs/EXTERNAL_REVIEW_STATUS.md`)
   - Evidence:
-- [ ] Pilot evidence reports collected (`docs/PILOT_EVIDENCE_TEMPLATE.md`)
+- [ ] Pilot evidence reports collected (`docs/pilots/`)
   - Evidence:
 - [ ] Alert routing verified (paging path tested end-to-end)
   - Evidence:

@@ -14,6 +14,7 @@ This page captures evidence for **Phase 3: Operational safety** from
 | No silent partial attach states (false-green prevention) | `daemon_run` logs `Attach contract validation failed` and hard-fails when attach metadata from `attach_all` is incomplete; regression test `TracingTest.DaemonRunRejectsSilentPartialAttachContract` |
 | Break-glass fail-safe behavior covered by tests | `TracingTest.DaemonRunForcesAuditOnlyWhenBreakGlassActive` |
 | Rollback path load-tested with <5s target | `PolicyRollbackTest.RollbackControlPathCompletesWithinFiveSecondsUnderLoad` (1,000 rollback attempts, enforced under 5s budget) |
+| Sustained drop-ratio control under soak | `scripts/soak_reliability.sh` enforces `MAX_EVENT_DROP_RATIO_PCT` (default `0.1`) with decision-event floor `MIN_TOTAL_DECISIONS` |
 | Agent crash behavior tested + documented | `.github/workflows/incident-drill.yml`, `scripts/collect_incident_bundle.sh`, `docs/INCIDENT_RESPONSE.md`, `docs/runbooks/INCIDENT_agent_crash.md` |
 
 ## Notes
@@ -25,4 +26,6 @@ This page captures evidence for **Phase 3: Operational safety** from
 - Daemon startup hard-fails if attach metadata reports fewer active file hooks
   than requested (prevents false-green "process alive, enforcement inactive"
   states).
+- Canary and go-live soak gates enforce event-drop ratio `<0.1%` against
+  observed decision events instead of only absolute drop counts.
 - Incident drill artifacts are uploaded in CI for recovery-path auditability.

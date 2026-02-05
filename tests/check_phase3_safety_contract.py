@@ -43,6 +43,8 @@ def main() -> int:
         "Attach contract validation failed",
         "RollbackControlPathCompletesWithinFiveSecondsUnderLoad",
         "1,000 rollback attempts",
+        "MAX_EVENT_DROP_RATIO_PCT",
+        "MIN_TOTAL_DECISIONS",
         ".github/workflows/incident-drill.yml",
     ]
     missing_doc = [item for item in required_doc_snippets if item not in doc_text]
@@ -61,10 +63,22 @@ def main() -> int:
         workflow_missing.append(f"{canary_workflow_path}: missing 'ENFORCE_SIGNAL=term'")
     if "ENFORCE_SIGNAL=term" not in go_live_workflow_text:
         workflow_missing.append(f"{go_live_workflow_path}: missing 'ENFORCE_SIGNAL=term'")
+    if "MAX_EVENT_DROP_RATIO_PCT=0.1" not in canary_workflow_text:
+        workflow_missing.append(
+            f"{canary_workflow_path}: missing 'MAX_EVENT_DROP_RATIO_PCT=0.1'"
+        )
+    if "MAX_EVENT_DROP_RATIO_PCT=0.1" not in go_live_workflow_text:
+        workflow_missing.append(
+            f"{go_live_workflow_path}: missing 'MAX_EVENT_DROP_RATIO_PCT=0.1'"
+        )
     if "ALLOW_SIGKILL_CANARY" not in canary_gate_text:
         workflow_missing.append(f"{canary_gate_path}: missing 'ALLOW_SIGKILL_CANARY'")
     if "Refusing ENFORCE_SIGNAL=kill" not in canary_gate_text:
         workflow_missing.append(f"{canary_gate_path}: missing kill-signal guard message")
+    if "MAX_EVENT_DROP_RATIO_PCT" not in canary_gate_text:
+        workflow_missing.append(f"{canary_gate_path}: missing 'MAX_EVENT_DROP_RATIO_PCT'")
+    if "MIN_TOTAL_DECISIONS" not in canary_gate_text:
+        workflow_missing.append(f"{canary_gate_path}: missing 'MIN_TOTAL_DECISIONS'")
 
     if workflow_missing:
         for item in workflow_missing:

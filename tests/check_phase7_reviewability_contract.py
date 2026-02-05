@@ -40,6 +40,8 @@ def main() -> int:
             "docs/THREAT_MODEL.md",
             "docs/PHASE6_META_SECURITY_EVIDENCE.md",
             "docs/MARKET_SCORECARD.md",
+            "docs/EXTERNAL_REVIEW_STATUS.md",
+            "docs/pilots/",
             "docs/runbooks/",
             "Any unverified claim must be downgraded to `PLANNED` or removed",
         ],

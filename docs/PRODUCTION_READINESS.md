@@ -89,6 +89,8 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Market-leadership release scorecard: `docs/MARKET_SCORECARD.md`
 - External review prep checklist: `docs/EXTERNAL_REVIEW_PREP.md`
 - Pilot evidence template: `docs/PILOT_EVIDENCE_TEMPLATE.md`
+- External review closure tracker: `docs/EXTERNAL_REVIEW_STATUS.md`
+- Pilot weekly evidence reports: `docs/pilots/`
 - Phase-1 product-contract evidence pack: `docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md`
 - Phase-2 correctness evidence pack: `docs/PHASE2_CORRECTNESS_EVIDENCE.md`
 - Phase-3 operational safety evidence pack: `docs/PHASE3_OPERATIONAL_SAFETY_EVIDENCE.md`

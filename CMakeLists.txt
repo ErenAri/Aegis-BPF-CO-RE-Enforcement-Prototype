@@ -482,6 +482,18 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/README.md
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/EXTERNAL_REVIEW_PREP.md
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/PILOT_EVIDENCE_TEMPLATE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/EXTERNAL_REVIEW_STATUS.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/pilots/README.md
+    )
+
+    add_test(
+        NAME superphase_c_adoption_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_superphase_c_adoption_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/EXTERNAL_REVIEW_STATUS.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/pilots
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/MARKET_SCORECARD.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/GO_LIVE_CHECKLIST.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/MARKET_LEADERSHIP_PLAN.md
     )
 
     add_test(

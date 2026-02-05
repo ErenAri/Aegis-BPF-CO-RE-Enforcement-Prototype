@@ -16,12 +16,13 @@ def require_text(path: Path, needles: list[str]) -> list[str]:
 
 
 def main() -> int:
-    if len(sys.argv) != 9:
+    if len(sys.argv) != 11:
         print(
             "usage: check_market_leadership_contract.py "
             "<market_leadership_plan.md> <market_scorecard.md> "
             "<maturity_program.md> <go_live_checklist.md> <pr_template.md> <readme.md> "
-            "<external_review_prep.md> <pilot_evidence_template.md>",
+            "<external_review_prep.md> <pilot_evidence_template.md> "
+            "<external_review_status.md> <pilots_readme.md>",
             file=sys.stderr,
         )
         return 2
@@ -34,6 +35,8 @@ def main() -> int:
     readme = Path(sys.argv[6])
     external_review_prep = Path(sys.argv[7])
     pilot_evidence_template = Path(sys.argv[8])
+    external_review_status = Path(sys.argv[9])
+    pilots_readme = Path(sys.argv[10])
 
     errors: list[str] = []
     errors += require_text(
@@ -53,6 +56,8 @@ def main() -> int:
             "`>=2` pilot environments",
             "docs/EXTERNAL_REVIEW_PREP.md",
             "docs/PILOT_EVIDENCE_TEMPLATE.md",
+            "docs/EXTERNAL_REVIEW_STATUS.md",
+            "docs/pilots/",
         ],
     )
     errors += require_text(
@@ -66,7 +71,8 @@ def main() -> int:
             "Syscall overhead (p95)",
             "`<=5%` (stretch `<=3%`)",
             "Pilot environments",
-            "docs/PILOT_EVIDENCE_TEMPLATE.md",
+            "docs/pilots/",
+            "docs/EXTERNAL_REVIEW_STATUS.md",
         ],
     )
     errors += require_text(
@@ -83,8 +89,8 @@ def main() -> int:
         [
             "Market leadership scorecard completed",
             "docs/MARKET_SCORECARD.md",
-            "docs/EXTERNAL_REVIEW_PREP.md",
-            "docs/PILOT_EVIDENCE_TEMPLATE.md",
+            "docs/EXTERNAL_REVIEW_STATUS.md",
+            "docs/pilots/",
         ],
     )
     errors += require_text(
@@ -104,6 +110,8 @@ def main() -> int:
             "docs/MARKET_LEADERSHIP_PLAN.md",
             "docs/MARKET_SCORECARD.md",
             "Claim Taxonomy",
+            "docs/EXTERNAL_REVIEW_STATUS.md",
+            "docs/pilots/",
         ],
     )
     errors += require_text(
@@ -123,6 +131,24 @@ def main() -> int:
             "Unexplained event drop ratio",
             "Silent partial attach incidents",
             "Explainability quality",
+        ],
+    )
+    errors += require_text(
+        external_review_status,
+        [
+            "# External Review Status",
+            "Unresolved critical findings: `0`",
+            "Findings tracker",
+            "Exit criteria status",
+        ],
+    )
+    errors += require_text(
+        pilots_readme,
+        [
+            "# Pilot Evidence Packs",
+            "two active pilot reports",
+            "rollback success rate",
+            "unexplained event drop ratio",
         ],
     )
 
