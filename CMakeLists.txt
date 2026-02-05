@@ -407,6 +407,7 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/e2e.yml
             ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/kernel-matrix.yml
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/e2e_file_enforcement_matrix.sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/validate_e2e_matrix_summary.py
     )
 
     add_test(
