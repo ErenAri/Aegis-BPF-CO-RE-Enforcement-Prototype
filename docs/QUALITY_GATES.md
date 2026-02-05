@@ -24,6 +24,7 @@ This project enforces quality gates through required CI checks on `main`.
   - PR: advisory signal only
   - Main: advisory trend storage on `gh-pages` (non-blocking on hosted runners)
   - Strict fail-on-regression: `.github/workflows/perf.yml` on deterministic self-hosted perf runners
+  - Perf artifact schema validation: `scripts/validate_perf_artifacts.py` in strict perf workflow
 
 ## Coverage ratchet policy
 

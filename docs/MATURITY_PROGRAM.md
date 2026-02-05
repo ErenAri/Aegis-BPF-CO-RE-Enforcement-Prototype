@@ -93,6 +93,7 @@ Definition of done:
 - Published p50/p95/p99 overhead for open/connect paths.
 - Published max sustained event rate and drop threshold behavior.
 - Benchmark noise controls defined (repetitions/min-time/tolerance bands).
+- Perf artifacts are schema-validated and attached to workflow evidence.
 
 Evidence bundle: `docs/PHASE5_PERFORMANCE_EVIDENCE.md`.
 
