@@ -38,6 +38,7 @@ def main() -> int:
             "actions/workflows/ci.yml",
             "actions/workflows/release.yml",
             "docs/THREAT_MODEL.md",
+            "docs/PHASE6_META_SECURITY_EVIDENCE.md",
             "docs/runbooks/",
             "Any unverified claim must be downgraded to `PLANNED` or removed",
         ],

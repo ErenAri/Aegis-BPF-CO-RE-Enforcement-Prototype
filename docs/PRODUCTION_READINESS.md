@@ -59,10 +59,11 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Security automation: `.github/workflows/security.yml` (CodeQL, dependency review, gitleaks)
 - Dependency update automation: `.github/dependabot.yml` (GitHub Actions) + `renovate.json` (CMake/regex-managed deps)
 - E2E workflow: `.github/workflows/e2e.yml`
-- Kernel file-enforcement matrix (>30 checks): `scripts/e2e_file_enforcement_matrix.sh` (run from `.github/workflows/e2e.yml` and `.github/workflows/kernel-matrix.yml`)
+- Kernel file-enforcement matrix (57 logical checks): `scripts/e2e_file_enforcement_matrix.sh` (run from `.github/workflows/e2e.yml` and `.github/workflows/kernel-matrix.yml` with summary/metadata artifacts, including `skipped_checks` when bind-mount alias checks cannot run)
 - Soak reliability workflow: `.github/workflows/soak.yml` + `scripts/soak_reliability.sh`
 - Staging canary workflow: `.github/workflows/canary.yml` + `scripts/canary_gate.sh`
 - Perf regression workflow: `.github/workflows/perf.yml`
+- Perf artifact schema validation: `scripts/validate_perf_artifacts.py` + `artifacts/perf/perf-evidence-report.md`
 - Hosted benchmark trend workflow (advisory): `.github/workflows/benchmark.yml`
 - Kernel matrix workflow: `.github/workflows/kernel-matrix.yml`
 - Nightly fuzz workflow: `.github/workflows/nightly-fuzz.yml`
@@ -71,6 +72,8 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Upgrade/migration runbook: `docs/UPGRADE.md`
 - Key rotation/revocation runbook: `docs/KEY_MANAGEMENT.md`
 - Key rotation drill workflow: `.github/workflows/key-rotation-drill.yml` + `scripts/key_rotation_drill.sh`
+- Capability contract validator: `scripts/validate_capability_contract.py` (documents vs systemd capability bounds)
+- Key-rotation artifact evidence: `artifacts/meta-security/key-rotation-summary.json` + `artifacts/meta-security/capability-contract-report.md`
 - Aggregated go-live evidence workflow: `.github/workflows/go-live-gate.yml`
 - Incident evidence collection script: `scripts/collect_incident_bundle.sh`
 - Incident drill workflow: `.github/workflows/incident-drill.yml`
@@ -81,6 +84,7 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Policy runtime semantics: `docs/POLICY_SEMANTICS.md`
 - Metrics interpretation guide: `docs/METRICS_OPERATIONS.md`
 - Maturity phase gates and done criteria: `docs/MATURITY_PROGRAM.md`
+- Phase-1 product-contract evidence pack: `docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md`
 - Phase-2 correctness evidence pack: `docs/PHASE2_CORRECTNESS_EVIDENCE.md`
 - Phase-3 operational safety evidence pack: `docs/PHASE3_OPERATIONAL_SAFETY_EVIDENCE.md`
 - Phase-4 portability evidence pack: `docs/PHASE4_PORTABILITY_EVIDENCE.md`

@@ -40,6 +40,9 @@ def main() -> int:
             "loopback",
             "Noise controls",
             "event-drop ratio",
+            "validate_perf_artifacts.py",
+            "Perf artifact contract",
+            "perf-evidence-report.md",
         ],
     )
     errors += require_text(
@@ -49,6 +52,10 @@ def main() -> int:
             "perf.yml",
             "benchmark.yml",
             "soak.yml",
+            "validate_perf_artifacts.py",
+            "perf-evidence-report.md",
+            "open_baseline.json",
+            "connect_with_agent.json",
         ],
     )
     errors += require_text(
@@ -57,10 +64,20 @@ def main() -> int:
             "scripts/perf_connect_bench.sh",
             "scripts/perf_workload_suite.sh",
             "Upload perf profiles",
+            "scripts/validate_perf_artifacts.py",
+            "Validate perf artifact schema",
+            "perf-evidence-report.md",
+            "perf_workload.json",
+            "kernel-info.txt",
+            "cpu-info.txt",
         ],
     )
     errors += require_text(open_bench, ["p50_us", "p95_us", "p99_us"])
     errors += require_text(connect_bench, ["p50_us", "p95_us", "p99_us"])
+
+    validator_script = Path(__file__).resolve().parents[1] / "scripts" / "validate_perf_artifacts.py"
+    if not validator_script.is_file():
+        errors.append(f"missing file: {validator_script}")
 
     if errors:
         for item in errors:

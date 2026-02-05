@@ -32,6 +32,7 @@ jobs:
 
       - name: Perf workload suite (realistic file workloads)
         run: |
+          mkdir -p artifacts/perf
           sudo BIN=./build/aegisbpf \
             FILE=/etc/hosts \
             OPEN_ITERATIONS=200000 \
@@ -43,7 +44,9 @@ jobs:
             MAX_CONNECT_PCT=15 \
             MAX_READ_PCT=15 \
             MAX_STAT_PCT=15 \
-            scripts/perf_workload_suite.sh
+            FORMAT=json \
+            OUT=artifacts/perf/perf_workload.json \
+            scripts/perf_workload_suite.sh | tee artifacts/perf/perf_workload.log
 
       - name: Capture percentile profiles (open/connect)
         run: |
@@ -52,6 +55,23 @@ jobs:
           sudo WITH_AGENT=1 BIN=./build/aegisbpf FORMAT=json OUT=artifacts/perf/open_with_agent.json ITERATIONS=100000 FILE=/etc/hosts scripts/perf_open_bench.sh
           sudo FORMAT=json OUT=artifacts/perf/connect_baseline.json ITERATIONS=50000 scripts/perf_connect_bench.sh
           sudo WITH_AGENT=1 BIN=./build/aegisbpf FORMAT=json OUT=artifacts/perf/connect_with_agent.json ITERATIONS=50000 scripts/perf_connect_bench.sh
+
+      - name: Capture perf metadata
+        run: |
+          uname -a > artifacts/perf/kernel-info.txt
+          cat /etc/os-release > artifacts/perf/os-release.txt || true
+          lscpu > artifacts/perf/cpu-info.txt || true
+          stat -f -c '%T' /tmp > artifacts/perf/fs-type.txt || true
+
+      - name: Validate perf artifact schema
+        run: |
+          python3 scripts/validate_perf_artifacts.py \
+            --open-baseline artifacts/perf/open_baseline.json \
+            --open-with-agent artifacts/perf/open_with_agent.json \
+            --connect-baseline artifacts/perf/connect_baseline.json \
+            --connect-with-agent artifacts/perf/connect_with_agent.json \
+            --workload artifacts/perf/perf_workload.json \
+            --report artifacts/perf/perf-evidence-report.md
 
       - name: Upload perf profiles
         uses: actions/upload-artifact@v4

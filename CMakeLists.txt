@@ -391,15 +391,31 @@ if(BUILD_TESTING)
     )
 
     add_test(
+        NAME phase1_product_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase1_product_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/THREAT_MODEL.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/POLICY_SEMANTICS.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/MATURITY_PROGRAM.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/README.md
+    )
+
+    add_test(
         NAME phase2_evidence_contract
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase2_evidence_contract.py
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE2_CORRECTNESS_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/e2e.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/kernel-matrix.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/e2e_file_enforcement_matrix.sh
     )
 
     add_test(
         NAME phase3_safety_contract
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_phase3_safety_contract.py
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/PHASE3_OPERATIONAL_SAFETY_EVIDENCE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/canary.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/go-live-gate.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/canary_gate.sh
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tracing.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_policy.cpp
     )
@@ -431,6 +447,16 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/SECURITY.md
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/KEY_MANAGEMENT.md
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_commands.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/packaging/systemd/aegisbpf.service
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/key-rotation-drill.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/key_rotation_drill.sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/validate_capability_contract.py
+    )
+
+    add_test(
+        NAME capability_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/validate_capability_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/SECURITY.md
             ${CMAKE_CURRENT_SOURCE_DIR}/packaging/systemd/aegisbpf.service
     )
 

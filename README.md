@@ -57,6 +57,8 @@ Current flagship contract (`docs/MATURITY_PROGRAM.md`):
 > Block unauthorized file opens/reads using inode-first enforcement for
 > cgroup-scoped workloads, with safe rollback and signed policy provenance.
 
+Phase-1 contract evidence: `docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md`.
+
 Current scope labels:
 - `ENFORCED`: file deny via LSM (`file_open` / `inode_permission`), network
   deny for configured connect/bind rules when LSM hooks are available
@@ -534,6 +536,7 @@ Security boundaries, attacker model, and known blind spots are documented in
 | [NETWORK_LAYER_DESIGN.md](docs/NETWORK_LAYER_DESIGN.md) | Network blocking architecture |
 | [THREAT_MODEL.md](docs/THREAT_MODEL.md) | Threat model, coverage boundaries, and known bypass surface |
 | [MATURITY_PROGRAM.md](docs/MATURITY_PROGRAM.md) | Phase-gated maturity ladder with numeric completion criteria |
+| [PHASE1_PRODUCT_CONTRACT_EVIDENCE.md](docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md) | Evidence bundle for the flagship product contract |
 
 ### Operations
 

@@ -14,15 +14,18 @@ This project enforces quality gates through required CI checks on `main`.
 - Coverage report with minimum thresholds
 - Required-checks contract validation (`required_checks*.txt` -> workflow contexts)
 - Label contract validation (`repo_labels.json` -> workflows/templates references)
-- Phase evidence contracts (`phase2_evidence_contract`, `phase3_safety_contract`,
-  `phase4_portability_contract`, `phase5_performance_contract`,
+- Phase evidence contracts (`phase1_product_contract`, `phase2_evidence_contract`,
+  `phase3_safety_contract`, `phase4_portability_contract`,
+  `phase5_performance_contract`,
   `phase6_meta_security_contract`, `phase7_reviewability_contract`)
+- Capability contract validation (`capability_contract`)
 - SBOM generation
 - Security scans (`dependency-review`, `codeql`, `gitleaks`)
 - Benchmark regression policy:
   - PR: advisory signal only
   - Main: advisory trend storage on `gh-pages` (non-blocking on hosted runners)
   - Strict fail-on-regression: `.github/workflows/perf.yml` on deterministic self-hosted perf runners
+  - Perf artifact schema validation: `scripts/validate_perf_artifacts.py` in strict perf workflow
 
 ## Coverage ratchet policy
 

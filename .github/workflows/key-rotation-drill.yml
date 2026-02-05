@@ -17,4 +17,22 @@ jobs:
           sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
 
       - name: Run key rotation drill
-        run: BUILD_DIR=build-key-drill scripts/key_rotation_drill.sh
+        run: |
+          mkdir -p artifacts/meta-security
+          BUILD_DIR=build-key-drill \
+          SKIP_BPF_BUILD=ON \
+          SUMMARY_OUT=artifacts/meta-security/key-rotation-summary.json \
+          scripts/key_rotation_drill.sh
+
+      - name: Validate capability contract
+        run: |
+          python3 scripts/validate_capability_contract.py \
+            SECURITY.md \
+            packaging/systemd/aegisbpf.service \
+            --report artifacts/meta-security/capability-contract-report.md
+
+      - name: Upload meta-security drill artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-security-drill
+          path: artifacts/meta-security

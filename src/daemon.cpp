@@ -35,6 +35,7 @@ Result<void> setup_agent_cgroup(BpfState& state);
 ValidateConfigDirectoryPermissionsFn g_validate_config_directory_permissions =
     validate_config_directory_permissions;
 DetectKernelFeaturesFn g_detect_kernel_features = detect_kernel_features;
+DetectBreakGlassFn g_detect_break_glass = detect_break_glass;
 BumpMemlockRlimitFn g_bump_memlock_rlimit = bump_memlock_rlimit;
 LoadBpfFn g_load_bpf = load_bpf;
 EnsureLayoutVersionFn g_ensure_layout_version = ensure_layout_version;
@@ -177,6 +178,16 @@ void reset_detect_kernel_features_for_test()
     g_detect_kernel_features = detect_kernel_features;
 }
 
+void set_detect_break_glass_for_test(DetectBreakGlassFn fn)
+{
+    g_detect_break_glass = fn ? fn : detect_break_glass;
+}
+
+void reset_detect_break_glass_for_test()
+{
+    g_detect_break_glass = detect_break_glass;
+}
+
 void set_bump_memlock_rlimit_for_test(BumpMemlockRlimitFn fn)
 {
     g_bump_memlock_rlimit = fn ? fn : bump_memlock_rlimit;
@@ -266,7 +277,7 @@ int daemon_run(bool audit_only,
     };
 
     // Check for break-glass mode FIRST
-    bool break_glass_active = detect_break_glass();
+    bool break_glass_active = g_detect_break_glass();
     if (break_glass_active) {
         logger().log(SLOG_WARN("Break-glass mode detected - forcing audit-only mode"));
         audit_only = true;

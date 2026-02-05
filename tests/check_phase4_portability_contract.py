@@ -33,7 +33,14 @@ def main() -> int:
     errors: list[str] = []
     errors += require_contains(
         compatibility,
-        ["docs/PHASE4_PORTABILITY_EVIDENCE.md"],
+        [
+            "docs/PHASE4_PORTABILITY_EVIDENCE.md",
+            "## CI-Backed Evidence Matrix",
+            "e2e-matrix-summary-<kernel>.json",
+            "compatibility-evidence-<kernel>.md",
+            "fs-type-<kernel>.txt",
+            "os-release-<kernel>.txt",
+        ],
     )
     errors += require_contains(
         evidence,
@@ -47,6 +54,10 @@ def main() -> int:
             "ubuntu",
             "debian",
             "rhel",
+            "## Artifact contract",
+            "e2e-matrix-summary-<kernel>.json",
+            "compatibility-evidence-<kernel>.md",
+            "compatibility-evidence-e2e.md",
         ],
     )
     errors += require_contains(
@@ -61,6 +72,15 @@ def main() -> int:
 
     if workflow.is_file():
         text = workflow.read_text(encoding="utf-8")
+        for marker in [
+            "Build compatibility evidence note",
+            "compatibility-evidence-${{ matrix.kernel }}.md",
+            "e2e-matrix-summary-${{ matrix.kernel }}.json",
+            "os-release-${{ matrix.kernel }}.txt",
+            "fs-type-${{ matrix.kernel }}.txt",
+        ]:
+            if marker not in text:
+                errors.append(f"{workflow}: missing '{marker}'")
         weekly_marker = "kernel-matrix-weekly:"
         if weekly_marker not in text:
             errors.append(f"{workflow}: missing '{weekly_marker}'")

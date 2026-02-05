@@ -80,6 +80,27 @@ AegisBPF cannot run if:
 Compatibility CI evidence and kernel/distro matrix source of truth are tracked
 in `docs/PHASE4_PORTABILITY_EVIDENCE.md`.
 
+## CI-Backed Evidence Matrix
+
+The portability table is backed by workflow and artifact evidence, not manual
+assertions.
+
+| Evidence dimension | Source | Artifact marker |
+|---|---|---|
+| Kernel matrix target set | `.github/workflows/kernel-matrix.yml` | `kernel-matrix-artifacts-<distro>-<kernel>/...` |
+| Enforcement checks per target | `scripts/e2e_file_enforcement_matrix.sh` | `e2e-matrix-summary-<kernel>.json` |
+| Runner OS/distro metadata | kernel/e2e workflows | `os-release-<kernel>.txt` / `os-release.txt` |
+| Filesystem metadata | kernel/e2e workflows | `fs-type-<kernel>.txt` / `fs-type.txt` |
+| Human-readable run summary | kernel/e2e workflows | `compatibility-evidence-<kernel>.md` / `compatibility-evidence-e2e.md` |
+
+Review procedure:
+1. Open the latest kernel-matrix workflow run.
+2. Download `kernel-matrix-artifacts-*` bundles.
+3. Confirm `failed_checks == 0` in each summary JSON and inspect
+   `skipped_checks`.
+4. Correlate distro/kernel/filesystem fields with the compatibility claim under
+   review.
+
 ## Distribution and Runtime Quirks
 
 - **Ubuntu 22.04 (5.15)**: stable baseline for LSM hooks; ensure BTF package is present on custom kernels.

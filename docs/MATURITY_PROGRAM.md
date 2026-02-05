@@ -48,15 +48,20 @@ Definition of done:
 - Policy semantics spec defines precedence, inode/path behavior, and namespace
   caveats.
 - Claim taxonomy is documented and applied to user-facing feature statements.
+- Evidence pack exists at `docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md` and is
+  enforced by `phase1_product_contract`.
 
 ## Phase 2: Correctness proof
 
 Definition of done:
 - At least 30 kernel e2e enforcement tests run in CI.
+- Basis-set scenarios (direct/symlink/hardlink/rename) are mandatory and
+  versioned in Phase-2 evidence.
 - CI executes on at least 2 kernel targets for enforcement-path changes.
 - Parser/property fuzzing runs nightly and on-demand for changed parsers.
 - Failure-mode regression suite covers map-full, verifier reject, load failure,
   parse/signature failure, and rollback failure.
+- Kernel/distro/filesystem execution metadata is retained as CI artifacts.
 
 ## Phase 3: Operational safety
 
@@ -64,6 +69,8 @@ Definition of done:
 - Safe rollout controls exist: audit-only, canary scope, break-glass.
 - Kill behavior is behind compile-time and runtime gates, default off, and
   rate-limited.
+- Canary workflows enforce staged `ENFORCE_SIGNAL=term`; kill-mode canary is
+  explicitly blocked unless a dedicated override is supplied.
 - Rollback path is load-tested and measured (<5s target for standard policy
   updates).
 - Agent crash behavior and recovery are tested and documented.
@@ -86,6 +93,7 @@ Definition of done:
 - Published p50/p95/p99 overhead for open/connect paths.
 - Published max sustained event rate and drop threshold behavior.
 - Benchmark noise controls defined (repetitions/min-time/tolerance bands).
+- Perf artifacts are schema-validated and attached to workflow evidence.
 
 Evidence bundle: `docs/PHASE5_PERFORMANCE_EVIDENCE.md`.
 
@@ -94,7 +102,8 @@ Evidence bundle: `docs/PHASE5_PERFORMANCE_EVIDENCE.md`.
 Definition of done:
 - Signing lifecycle tests cover key add/rotate/revoke + anti-rollback.
 - Release pipeline emits SBOM + signed artifacts + provenance attestations.
-- Capability requirements are minimized, documented, and validated.
+- Capability requirements are minimized, documented, and validated via CI
+  artifacts (`key-rotation-summary.json`, `capability-contract-report.md`).
 
 Evidence bundle: `docs/PHASE6_META_SECURITY_EVIDENCE.md`.
 

@@ -86,3 +86,39 @@ FORMAT=json OUT=/tmp/connect.json ITERATIONS=50000 scripts/perf_connect_bench.sh
 
 CI stores these JSON profiles as `perf-profiles` artifacts in
 `.github/workflows/perf.yml`.
+
+## Artifact schema validation
+
+Perf CI validates artifact schema before upload:
+
+```bash
+python3 scripts/validate_perf_artifacts.py \
+  --open-baseline artifacts/perf/open_baseline.json \
+  --open-with-agent artifacts/perf/open_with_agent.json \
+  --connect-baseline artifacts/perf/connect_baseline.json \
+  --connect-with-agent artifacts/perf/connect_with_agent.json \
+  --workload artifacts/perf/perf_workload.json \
+  --report artifacts/perf/perf-evidence-report.md
+```
+
+Validation guarantees:
+- required JSON keys exist for each profile
+- percentile ordering is sane (`p50 <= p95 <= p99`)
+- workload suite includes all required rows
+  (`open_close`, `connect_loopback`, `full_read`, `stat_walk`)
+- with-agent profiles are labeled consistently
+
+## Perf artifact contract
+
+Required artifacts for each strict perf run:
+- `open_baseline.json`
+- `open_with_agent.json`
+- `connect_baseline.json`
+- `connect_with_agent.json`
+- `perf_workload.json`
+- `perf_workload.log`
+- `perf-evidence-report.md`
+- `kernel-info.txt`
+- `os-release.txt`
+- `cpu-info.txt`
+- `fs-type.txt`

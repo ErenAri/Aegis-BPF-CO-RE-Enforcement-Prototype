@@ -7,6 +7,8 @@ For full attacker-model detail, coverage boundaries, and known bypass surfaces,
 see `docs/THREAT_MODEL.md`.
 Phase gates and numeric completion criteria are tracked in
 `docs/MATURITY_PROGRAM.md`.
+Phase-1 contract evidence is tracked in
+`docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md`.
 
 ## Golden contract
 

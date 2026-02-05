@@ -7,9 +7,11 @@ This page captures evidence for **Phase 3: Operational safety** from
 
 | Phase-3 gate | Evidence |
 |---|---|
-| Safe rollout controls (audit/canary/break-glass) | `.github/workflows/canary.yml`, `scripts/canary_gate.sh`, `docs/CANARY_RUNBOOK.md`, `docs/runbooks/RECOVERY_break_glass.md` |
+| Safe rollout controls (audit/canary/break-glass) | `.github/workflows/canary.yml`, `.github/workflows/go-live-gate.yml`, `scripts/canary_gate.sh`, `docs/CANARY_RUNBOOK.md`, `docs/runbooks/RECOVERY_break_glass.md` |
 | SIGKILL behind compile/runtime gates, default off, rate-limited | `-DENABLE_SIGKILL_ENFORCEMENT=ON` (build gate), `run --enforce-signal=kill --allow-sigkill` (runtime gate), existing escalation controls `--kill-escalation-threshold` + `--kill-escalation-window-seconds` |
+| Canary guardrail against self-DoS | `scripts/canary_gate.sh` rejects `ENFORCE_SIGNAL=kill` unless `ALLOW_SIGKILL_CANARY=1` |
 | Guardrail regression tests for kill gating | `TracingTest.DaemonRunGuardsSigkillBehindBuildAndRuntimeFlags`, `cli_run_rejects_sigkill_without_allow_gate` |
+| Break-glass fail-safe behavior covered by tests | `TracingTest.DaemonRunForcesAuditOnlyWhenBreakGlassActive` |
 | Rollback path load-tested with <5s target | `PolicyRollbackTest.RollbackControlPathCompletesWithinFiveSecondsUnderLoad` (60 rollback attempts, enforced under 5s budget) |
 | Agent crash behavior tested + documented | `.github/workflows/incident-drill.yml`, `scripts/collect_incident_bundle.sh`, `docs/INCIDENT_RESPONSE.md`, `docs/runbooks/INCIDENT_agent_crash.md` |
 

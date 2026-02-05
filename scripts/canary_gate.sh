@@ -9,6 +9,7 @@ DURATION_SECONDS="${DURATION_SECONDS:-300}"
 MAX_RINGBUF_DROPS="${MAX_RINGBUF_DROPS:-100}"
 MAX_RSS_GROWTH_KB="${MAX_RSS_GROWTH_KB:-65536}"
 ENFORCE_SIGNAL="${ENFORCE_SIGNAL:-term}"
+ALLOW_SIGKILL_CANARY="${ALLOW_SIGKILL_CANARY:-0}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "canary_gate.sh must run as root" >&2
@@ -22,6 +23,12 @@ fi
 
 if [[ "${PHASE}" != "audit" && "${PHASE}" != "enforce" ]]; then
     echo "PHASE must be 'audit' or 'enforce' (got: ${PHASE})" >&2
+    exit 1
+fi
+
+if [[ "${PHASE}" == "enforce" && "${ENFORCE_SIGNAL}" == "kill" && "${ALLOW_SIGKILL_CANARY}" != "1" ]]; then
+    echo "Refusing ENFORCE_SIGNAL=kill for canary without ALLOW_SIGKILL_CANARY=1" >&2
+    echo "Use ENFORCE_SIGNAL=term for staged canary validation." >&2
     exit 1
 fi
 
