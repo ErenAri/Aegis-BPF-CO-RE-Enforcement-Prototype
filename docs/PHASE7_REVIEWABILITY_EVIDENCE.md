@@ -26,6 +26,8 @@ This page is the single reviewability index for Phase 7 from
   `docs/PHASE4_PORTABILITY_EVIDENCE.md`
 - Performance methodology and percentile outputs: `docs/PERF.md`,
   `docs/PHASE5_PERFORMANCE_EVIDENCE.md`
+- Agent meta-security proofs (key lifecycle, release signing, capability bounds):
+  `docs/PHASE6_META_SECURITY_EVIDENCE.md`
 - Operational runbooks and incident controls: `docs/runbooks/`,
   `docs/INCIDENT_RESPONSE.md`
 

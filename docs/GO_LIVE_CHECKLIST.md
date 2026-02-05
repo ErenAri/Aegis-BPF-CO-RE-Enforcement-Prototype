@@ -67,6 +67,8 @@ or incident ticket) rather than free-form notes.
   - Evidence:
 - [ ] Signed artifact verification walkthrough validated
   - Evidence:
+- [ ] Capability contract report attached (`capability-contract-report.md`)
+  - Evidence:
 - [ ] `Go-Live Gate` workflow artifact bundle generated
   - Evidence:
 

@@ -176,6 +176,13 @@ jobs:
           sha256sum "${files[@]}" > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Validate capability contract
+        run: |
+          python3 scripts/validate_capability_contract.py \
+            SECURITY.md \
+            packaging/systemd/aegisbpf.service \
+            --report release/capability-contract-report.md
+
       - name: Generate build provenance attestations
         uses: actions/attest-build-provenance@v2
         with:
@@ -184,12 +191,14 @@ jobs:
             release/*.deb
             release/*.rpm
             release/SHA256SUMS.txt
+            release/capability-contract-report.md
 
       - name: Sign artifacts with Cosign (keyless)
         run: |
           cd release
           shopt -s nullglob
-          for file in *.tar.gz *.deb *.rpm SHA256SUMS.txt; do
+          for file in *.tar.gz *.deb *.rpm SHA256SUMS.txt capability-contract-report.md; do
+            [ -f "${file}" ] || continue
             cosign sign-blob --yes --output-signature "${file}.sig" --output-certificate "${file}.pem" "$file"
           done
 

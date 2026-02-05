@@ -102,7 +102,8 @@ Evidence bundle: `docs/PHASE5_PERFORMANCE_EVIDENCE.md`.
 Definition of done:
 - Signing lifecycle tests cover key add/rotate/revoke + anti-rollback.
 - Release pipeline emits SBOM + signed artifacts + provenance attestations.
-- Capability requirements are minimized, documented, and validated.
+- Capability requirements are minimized, documented, and validated via CI
+  artifacts (`key-rotation-summary.json`, `capability-contract-report.md`).
 
 Evidence bundle: `docs/PHASE6_META_SECURITY_EVIDENCE.md`.
 

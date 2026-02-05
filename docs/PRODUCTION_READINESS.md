@@ -72,6 +72,8 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Upgrade/migration runbook: `docs/UPGRADE.md`
 - Key rotation/revocation runbook: `docs/KEY_MANAGEMENT.md`
 - Key rotation drill workflow: `.github/workflows/key-rotation-drill.yml` + `scripts/key_rotation_drill.sh`
+- Capability contract validator: `scripts/validate_capability_contract.py` (documents vs systemd capability bounds)
+- Key-rotation artifact evidence: `artifacts/meta-security/key-rotation-summary.json` + `artifacts/meta-security/capability-contract-report.md`
 - Aggregated go-live evidence workflow: `.github/workflows/go-live-gate.yml`
 - Incident evidence collection script: `scripts/collect_incident_bundle.sh`
 - Incident drill workflow: `.github/workflows/incident-drill.yml`

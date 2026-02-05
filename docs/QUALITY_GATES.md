@@ -18,6 +18,7 @@ This project enforces quality gates through required CI checks on `main`.
   `phase3_safety_contract`, `phase4_portability_contract`,
   `phase5_performance_contract`,
   `phase6_meta_security_contract`, `phase7_reviewability_contract`)
+- Capability contract validation (`capability_contract`)
 - SBOM generation
 - Security scans (`dependency-review`, `codeql`, `gitleaks`)
 - Benchmark regression policy:

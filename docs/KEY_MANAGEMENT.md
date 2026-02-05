@@ -82,3 +82,13 @@ and verify signed policy apply succeeds.
 - Rotate signing keys at least every 90 days.
 - Run a revocation drill at least once per quarter.
 - Require two-person review for key rollout/revocation changes.
+
+## CI drill evidence
+
+Quarterly CI drill (`.github/workflows/key-rotation-drill.yml`) publishes:
+
+- `artifacts/meta-security/key-rotation-summary.json`
+- `artifacts/meta-security/capability-contract-report.md`
+
+Treat both artifacts as required evidence for release-impacting security
+reviews.

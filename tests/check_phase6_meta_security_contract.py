@@ -16,11 +16,12 @@ def require_text(path: Path, needles: list[str]) -> list[str]:
 
 
 def main() -> int:
-    if len(sys.argv) != 7:
+    if len(sys.argv) != 10:
         print(
             "usage: check_phase6_meta_security_contract.py "
             "<phase6-evidence.md> <release.yml> <security.md> <key_management.md> "
-            "<test_commands.cpp> <systemd-service>",
+            "<test_commands.cpp> <systemd-service> <key-rotation-workflow.yml> "
+            "<key-rotation-drill.sh> <validate-capability-contract.py>",
             file=sys.stderr,
         )
         return 2
@@ -31,6 +32,9 @@ def main() -> int:
     key_mgmt_doc = Path(sys.argv[4])
     command_tests = Path(sys.argv[5])
     service_unit = Path(sys.argv[6])
+    key_rotation_workflow = Path(sys.argv[7])
+    key_rotation_script = Path(sys.argv[8])
+    capability_validator = Path(sys.argv[9])
 
     errors: list[str] = []
     errors += require_text(
@@ -42,6 +46,8 @@ def main() -> int:
             "Generate SBOM",
             "attest-build-provenance",
             "CapabilityBoundingSet",
+            "key-rotation-summary.json",
+            "capability-contract-report.md",
         ],
     )
     errors += require_text(
@@ -50,6 +56,9 @@ def main() -> int:
             "Generate SBOM",
             "Sign artifacts with Cosign",
             "actions/attest-build-provenance",
+            "Generate build provenance attestations",
+            "Validate capability contract",
+            "capability-contract-report.md",
         ],
     )
     errors += require_text(
@@ -71,6 +80,28 @@ def main() -> int:
     errors += require_text(
         service_unit,
         ["CapabilityBoundingSet", "AmbientCapabilities", "AEGIS_ALLOW_SIGKILL"],
+    )
+    errors += require_text(
+        key_rotation_workflow,
+        [
+            "SUMMARY_OUT=artifacts/meta-security/key-rotation-summary.json",
+            "SKIP_BPF_BUILD=ON",
+            "validate_capability_contract.py",
+            "Upload meta-security drill artifacts",
+        ],
+    )
+    errors += require_text(
+        key_rotation_script,
+        [
+            "SKIP_BPF_BUILD",
+            "SUMMARY_OUT",
+            "\"suite\": \"key_rotation_drill\"",
+            "\"status\": \"passed\"",
+        ],
+    )
+    errors += require_text(
+        capability_validator,
+        ["CapabilityBoundingSet", "AmbientCapabilities", "Minimum Privileges"],
     )
 
     if errors:

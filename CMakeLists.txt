@@ -448,6 +448,16 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/docs/KEY_MANAGEMENT.md
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_commands.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/packaging/systemd/aegisbpf.service
+            ${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/key-rotation-drill.yml
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/key_rotation_drill.sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/validate_capability_contract.py
+    )
+
+    add_test(
+        NAME capability_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/validate_capability_contract.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/SECURITY.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/packaging/systemd/aegisbpf.service
     )
 
     add_test(
