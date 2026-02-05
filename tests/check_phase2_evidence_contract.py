@@ -71,7 +71,10 @@ def main() -> int:
         e2e_script,
         [
             "SUMMARY_OUT",
+            "skipped_checks",
             "inode stable across rename",
+            "inode stable across bind mount alias",
+            "cat traversal",
             "cat renamed",
         ],
     )

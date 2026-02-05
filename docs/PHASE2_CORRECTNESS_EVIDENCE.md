@@ -29,11 +29,17 @@ The first four are enforced by `scripts/e2e_file_enforcement_matrix.sh`; the
 remaining caveats are explicit contract boundaries in `docs/THREAT_MODEL.md`
 and `docs/POLICY_SEMANTICS.md`.
 
+Current matrix depth:
+- 57 logical checks total (19 per signal mode across `none`, `term`, `int`)
+- includes bind-mount alias checks when `mount --bind` is available
+- emits `skipped_checks` in summary output when bind-mount capability is not
+  available in the execution environment
+
 ## Gate-to-evidence mapping
 
 | Phase-2 gate | Evidence |
 |---|---|
-| `>=30` kernel e2e enforcement checks in CI | `scripts/e2e_file_enforcement_matrix.sh` (45 checks) wired in `.github/workflows/e2e.yml` and `.github/workflows/kernel-matrix.yml` |
+| `>=30` kernel e2e enforcement checks in CI | `scripts/e2e_file_enforcement_matrix.sh` (57 logical checks) wired in `.github/workflows/e2e.yml` and `.github/workflows/kernel-matrix.yml` |
 | Multi-kernel enforcement-path CI | `kernel-matrix-pr` job in `.github/workflows/kernel-matrix.yml` on `kernel-5.15` + `kernel-6.1` |
 | Parser/property fuzz signal for changed parser paths | `parser-fuzz` job in `.github/workflows/ci.yml` using `scripts/run_parser_fuzz_changed.sh` |
 | Baseline fuzzing across parser/network/event surfaces | `smoke-fuzz` in `.github/workflows/ci.yml` and deep run in `.github/workflows/nightly-fuzz.yml` |

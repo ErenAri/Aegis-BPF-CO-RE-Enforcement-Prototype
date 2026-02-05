@@ -8,6 +8,7 @@ SUMMARY_OUT="${SUMMARY_OUT:-}"
 declare -i TOTAL_CHECKS=0
 declare -i PASSED_CHECKS=0
 declare -i FAILED_CHECKS=0
+declare -i SKIPPED_CHECKS=0
 
 AGENT_PID=""
 TMP_DIR=""
@@ -43,6 +44,14 @@ fail() {
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
     echo "[FAIL] ${label}: ${detail}" >&2
+}
+
+skip() {
+    local label="$1"
+    local detail="$2"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    SKIPPED_CHECKS=$((SKIPPED_CHECKS + 1))
+    echo "[SKIP] ${label}: ${detail}"
 }
 
 run_expect_success() {
@@ -134,11 +143,14 @@ run_signal_suite() {
     local symlink_path="${scenario_dir}/target.symlink"
     local hardlink_path="${scenario_dir}/target.hardlink"
     local renamed_path="${scenario_dir}/target.renamed"
+    local bind_alias_path="${scenario_dir}/target.bind"
 
     mkdir -p "${scenario_dir}"
+    mkdir -p "${scenario_dir}/subdir"
     printf 'signal=%s\n' "${signal}" >"${target}"
     ln -sf "${target}" "${symlink_path}"
     ln "${target}" "${hardlink_path}"
+    touch "${bind_alias_path}"
 
     local inode
     inode="$(stat -c %i "${target}")"
@@ -161,6 +173,7 @@ run_signal_suite() {
     run_expect_blocked "${signal}: head symlink" head -c 1 "${symlink_path}"
     run_expect_blocked "${signal}: cat hardlink" cat "${hardlink_path}"
     run_expect_blocked "${signal}: dd hardlink" dd if="${hardlink_path}" of=/dev/null bs=1 count=1 status=none
+    run_expect_blocked "${signal}: cat traversal" cat "${scenario_dir}/subdir/../target.txt"
 
     # Rename should not bypass inode-based enforcement.
     mv "${target}" "${renamed_path}"
@@ -175,9 +188,34 @@ run_signal_suite() {
     fi
     mv "${renamed_path}" "${target}"
 
+    local bind_mounted=0
+    if mount --bind "${target}" "${bind_alias_path}" >/dev/null 2>&1; then
+        bind_mounted=1
+        run_expect_blocked "${signal}: cat bind" cat "${bind_alias_path}"
+        run_expect_blocked "${signal}: head bind" head -c 1 "${bind_alias_path}"
+        local bind_inode
+        bind_inode="$(stat -c %i "${bind_alias_path}")"
+        if [[ "${bind_inode}" == "${inode}" ]]; then
+            pass "${signal}: inode stable across bind mount alias"
+        else
+            fail "${signal}: inode stable across bind mount alias" \
+                 "expected ${inode}, got ${bind_inode}"
+        fi
+    else
+        skip "${signal}: bind mount alias checks" "mount --bind unavailable in this environment"
+        skip "${signal}: bind mount alias checks" "mount --bind unavailable in this environment"
+        skip "${signal}: bind mount alias checks" "mount --bind unavailable in this environment"
+    fi
+
     sleep 1
     run_expect_success "${signal}: expected action logged" grep -q "\"action\":\"${expected_action}\"" "${LOG_FILE}"
     run_expect_success "${signal}: inode logged" grep -q "\"ino\":${inode}" "${LOG_FILE}"
+
+    if [[ "${bind_mounted}" -eq 1 ]]; then
+        if ! umount "${bind_alias_path}" >/dev/null 2>&1; then
+            fail "${signal}: unmount bind alias" "failed to unmount ${bind_alias_path}"
+        fi
+    fi
 
     "${BIN}" block del "${target}" >/dev/null 2>&1 || true
     stop_agent
@@ -213,6 +251,7 @@ main() {
   "total_checks": ${TOTAL_CHECKS},
   "passed_checks": ${PASSED_CHECKS},
   "failed_checks": ${FAILED_CHECKS},
+  "skipped_checks": ${SKIPPED_CHECKS},
   "kernel_release": "${kernel_rel}",
   "os_id": "${os_id}",
   "os_version": "${os_version}",
@@ -222,7 +261,7 @@ EOF
     fi
 
     echo
-    echo "E2E matrix summary: passed=${PASSED_CHECKS} failed=${FAILED_CHECKS} total=${TOTAL_CHECKS}"
+    echo "E2E matrix summary: passed=${PASSED_CHECKS} failed=${FAILED_CHECKS} skipped=${SKIPPED_CHECKS} total=${TOTAL_CHECKS}"
     if ((FAILED_CHECKS > 0)); then
         exit 1
     fi
