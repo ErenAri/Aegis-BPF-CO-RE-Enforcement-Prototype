@@ -86,6 +86,21 @@ int dispatch_health_command(int argc, char** argv, const char* prog)
     return cmd_health(json_output);
 }
 
+int dispatch_doctor_command(int argc, char** argv, const char* prog)
+{
+    bool json_output = false;
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--json") {
+            json_output = true;
+        }
+        else {
+            return usage(prog);
+        }
+    }
+    return cmd_doctor(json_output);
+}
+
 int dispatch_metrics_command(int argc, char** argv, const char* prog)
 {
     std::string out_path;
@@ -126,6 +141,7 @@ int dispatch_cli(int argc, char** argv)
     if (cmd == "keys") return dispatch_keys_command(argc, argv, argv[0]);
     if (cmd == "survival") return dispatch_survival_command(argc, argv, argv[0]);
     if (cmd == "health") return dispatch_health_command(argc, argv, argv[0]);
+    if (cmd == "doctor") return dispatch_doctor_command(argc, argv, argv[0]);
     if (cmd == "metrics") return dispatch_metrics_command(argc, argv, argv[0]);
     if (cmd == "stats") {
         bool detailed = false;

@@ -37,6 +37,7 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 ## Evidence log (fill as you complete)
 - CI build matrix: GitHub Actions on ubuntu-22.04 and ubuntu-24.04 + arm64 build via QEMU
 - Health check command: `./build/aegisbpf health`
+- Diagnostic command: `./build/aegisbpf doctor [--json]`
 - Policy lifecycle: lint/apply/export/show/rollback with v1 format
 - Policy integrity: sha256 verification via `policy apply --sha256` or env vars
 - Packaging: systemd unit in `packaging/systemd/` + CPack TGZ/DEB/RPM

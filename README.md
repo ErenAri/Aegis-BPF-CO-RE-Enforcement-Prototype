@@ -41,6 +41,7 @@
 - **Audit mode** - Monitor without blocking (works without BPF LSM)
 - **Prometheus metrics** - Export block counts and statistics
 - **Structured logging** - JSON or text output to stdout/journald
+- **Diagnostics** - `aegisbpf doctor` for enforcement readiness and kernel feature checks
 - **Policy files and signed bundles** - Declarative configuration with SHA256 verification and signature enforcement
 - **Kubernetes ready** - Helm chart for DaemonSet deployment
 

@@ -9,5 +9,6 @@ namespace aegis {
 int cmd_stats(bool detailed = false);
 int cmd_metrics(const std::string& out_path, bool detailed = false);
 int cmd_health(bool json_output = false);
+int cmd_doctor(bool json_output = false);
 
 }  // namespace aegis

@@ -21,7 +21,8 @@ int usage(const char* prog)
               << " | keys {list|add <pubkey.pub>}"
               << " | stats [--detailed]"
               << " | metrics [--out <path>] [--detailed]"
-              << " | health [--json]" << std::endl;
+              << " | health [--json]"
+              << " | doctor [--json]" << std::endl;
     return 1;
 }
 

@@ -4,7 +4,13 @@ This document helps diagnose and resolve common issues with AegisBPF.
 
 ## Quick Diagnostics
 
-Run the health check command to identify issues:
+Run the doctor command to identify issues:
+
+```bash
+sudo aegisbpf doctor
+```
+
+Basic health check (if you only need prerequisites):
 
 ```bash
 sudo aegisbpf health
