@@ -4,6 +4,7 @@ This checklist captures the minimum bar for a senior-level, production-ready
 release. Items are grouped by priority. Track completion and evidence as you
 deliver each requirement.
 
+For public CI evidence, see `docs/EVIDENCE.md`.
 ## P0 (must-have before production)
 - Policy format is versioned, validated, and backward-compatible (or has a
   clear migration plan).
@@ -85,6 +86,7 @@ deliver each requirement.
 - Metrics interpretation guide: `docs/METRICS_OPERATIONS.md`
 - Explainability CLI: `aegisbpf explain` (see `docs/PRODUCTION_DEPLOYMENT_BLUEPRINT.md`)
 - Production deployment blueprint: `docs/PRODUCTION_DEPLOYMENT_BLUEPRINT.md`
+- Public CI evidence map: `docs/EVIDENCE.md`
 - CI kernel-e2e execution strategy: `docs/CI_EXECUTION_STRATEGY.md`
 - Branch-protection baseline: `docs/BRANCH_PROTECTION.md` + `scripts/check_branch_protection.sh`
 - Branch-protection audit workflow: `.github/workflows/branch-protection-audit.yml`
