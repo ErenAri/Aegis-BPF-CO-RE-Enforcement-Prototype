@@ -7,45 +7,45 @@ This document describes the internal architecture of AegisBPF, an eBPF-based run
 AegisBPF uses eBPF (extended Berkeley Packet Filter) to monitor and optionally block process executions at the kernel level. It leverages the BPF LSM (Linux Security Module) hooks for enforcement and tracepoints for audit-only monitoring.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Space                               │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                     aegisbpf daemon                      │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────────┐ │   │
-│  │  │ Policy  │ │  BPF    │ │ Event   │ │    Metrics      │ │   │
-│  │  │ Manager │ │  Ops    │ │ Handler │ │    (Prometheus) │ │   │
-│  │  └────┬────┘ └────┬────┘ └────┬────┘ └────────┬────────┘ │   │
-│  │       │           │           │               │          │   │
-│  │       │      ┌────┴───────────┴───────────────┘          │   │
-│  │       │      │                                           │   │
-│  │       │      ▼                                           │   │
-│  │       │  ┌───────────────────────────────────────────┐   │   │
-│  │       └─►│            libbpf                         │   │   │
-│  │          └───────────────────────────────────────────┘   │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                  │
-│                              │ bpf() syscall                    │
-├──────────────────────────────┼──────────────────────────────────┤
-│                        Kernel Space                             │
-│                              │                                  │
-│  ┌───────────────────────────┴───────────────────────────────┐  │
-│  │                    BPF Subsystem                          │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐│  │
-│  │  │ LSM Hook    │  │ Tracepoint  │  │      BPF Maps       ││  │
-│  │  │ file_open   │  │ sched_exec  │  │  ┌───────────────┐  ││  │
-│  │  │             │  │             │  │  │ deny_inode    │  ││  │
-│  │  │  (enforce)  │  │  (audit)    │  │  │ deny_path     │  ││  │
-│  │  │             │  │             │  │  │ allow_cgroup  │  ││  │
-│  │  └──────┬──────┘  └──────┬──────┘  │  │ events (ring) │  ││  │
-│  │         │                │         │  │ block_stats   │  ││  │
-│  │         └────────────────┴─────────┴──┴───────────────┴──┘│  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                              │                                  │
-│                              ▼                                  │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                    exec() syscall                         │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
++-----------------------------------------------------------------+
+|                        User Space                               |
+|  +----------------------------------------------------------+   |
+|  |                     aegisbpf daemon                      |   |
+|  |  +---------+ +---------+ +---------+ +-----------------+ |   |
+|  |  | Policy  | |  BPF    | | Event   | |    Metrics      | |   |
+|  |  | Manager | |  Ops    | | Handler | |    (Prometheus) | |   |
+|  |  +----+----+ +----+----+ +----+----+ +--------+--------+ |   |
+|  |       |           |           |               |          |   |
+|  |       |      +----+-----------+---------------+          |   |
+|  |       |      |                                           |   |
+|  |       |      v                                           |   |
+|  |       |  +-------------------------------------------+   |   |
+|  |       +->|            libbpf                         |   |   |
+|  |          +-------------------------------------------+   |   |
+|  +----------------------------------------------------------+   |
+|                              |                                  |
+|                              | bpf() syscall                    |
++------------------------------+----------------------------------+
+|                        Kernel Space                             |
+|                              |                                  |
+|  +---------------------------+-------------------------------+  |
+|  |                    BPF Subsystem                          |  |
+|  |  +-------------+  +-------------+  +---------------------+|  |
+|  |  | LSM Hook    |  | Tracepoint  |  |      BPF Maps       ||  |
+|  |  | file_open   |  | sched_exec  |  |  +---------------+  ||  |
+|  |  |             |  |             |  |  | deny_inode    |  ||  |
+|  |  |  (enforce)  |  |  (audit)    |  |  | deny_path     |  ||  |
+|  |  |             |  |             |  |  | allow_cgroup  |  ||  |
+|  |  +------+------+  +------+------+  |  | events (ring) |  ||  |
+|  |         |                |         |  | block_stats   |  ||  |
+|  |         +----------------+---------+--+---------------+--+|  |
+|  +-----------------------------------------------------------+  |
+|                              |                                  |
+|                              v                                  |
+|  +-----------------------------------------------------------+  |
+|  |                    exec() syscall                         |  |
+|  +-----------------------------------------------------------+  |
++-----------------------------------------------------------------+
 ```
 
 ## Components
@@ -159,29 +159,29 @@ Error handling:
 
 ```
 1. Process calls open("/etc/shadow")
-           │
-           ▼
+           |
+           v
 2. Kernel invokes file_open LSM hook
-           │
-           ▼
+           |
+           v
 3. BPF program handle_file_open runs
-           │
-           ├─── Check allow_cgroup map
-           │    └─ If cgroup allowed → ALLOW
-           │
-           └─── Check deny_inode map
-                └─ If inode blocked → DENY + emit event
-           │
-           ▼
+           |
+           +--- Check allow_cgroup map
+           |    +- If cgroup allowed → ALLOW
+           |
+           +--- Check deny_inode map
+                +- If inode blocked → DENY + emit event
+           |
+           v
 4. Return 0 (allow) or -EPERM (deny)
-           │
-           ▼
+           |
+           v
 5. If denied, ring buffer event sent to userspace
-           │
-           ▼
+           |
+           v
 6. aegisbpf daemon receives event
-           │
-           ▼
+           |
+           v
 7. Event logged to journald/stdout
 ```
 
@@ -189,42 +189,42 @@ Error handling:
 
 ```
 1. Process executes a binary (execve)
-           │
-           ▼
+           |
+           v
 2. execve() completes successfully
-           │
-           ▼
+           |
+           v
 3. Kernel fires sched_process_exec tracepoint
-           │
-           ▼
+           |
+           v
 4. BPF program handle_execve runs
-           │
-           ▼
+           |
+           v
 5. EXEC event emitted to ring buffer
-           │
-           ▼
+           |
+           v
 6. aegisbpf daemon receives event
-           │
-           ▼
+           |
+           v
 7. Event logged to journald/stdout
 ```
 
 ```
 1. Process opens a file (open/openat)
-           │
-           ▼
+           |
+           v
 2. Kernel fires sys_enter_openat tracepoint
-           │
-           ▼
+           |
+           v
 3. BPF program handle_openat runs
-           │
-           ▼
+           |
+           v
 4. If path is in deny_path, emit audit-only BLOCK event
-           │
-           ▼
+           |
+           v
 5. aegisbpf daemon receives event
-           │
-           ▼
+           |
+           v
 6. Event logged to journald/stdout
 ```
 
@@ -234,15 +234,15 @@ Maps are pinned to /sys/fs/bpf/aegis/ for persistence:
 
 ```
 /sys/fs/bpf/aegis/
-├── deny_inode          # Blocked inodes
-├── deny_path           # Blocked paths
-├── allow_cgroup        # Allowed cgroups
-├── events              # Ring buffer (not pinned)
-├── block_stats         # Global counters
-├── deny_cgroup_stats   # Per-cgroup stats
-├── deny_inode_stats    # Per-inode stats
-├── deny_path_stats     # Per-path stats
-└── agent_meta          # Layout version
++-- deny_inode          # Blocked inodes
++-- deny_path           # Blocked paths
++-- allow_cgroup        # Allowed cgroups
++-- events              # Ring buffer (not pinned)
++-- block_stats         # Global counters
++-- deny_cgroup_stats   # Per-cgroup stats
++-- deny_inode_stats    # Per-inode stats
++-- deny_path_stats     # Per-path stats
++-- agent_meta          # Layout version
 ```
 
 Pinning allows:

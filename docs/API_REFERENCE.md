@@ -806,42 +806,42 @@ inline constexpr uint32_t kLayoutVersion = 1;
 
 ```
 /sys/fs/bpf/aegisbpf/
-├── deny_inode           # Inode deny map
-├── deny_path            # Path deny map
-├── allow_cgroup         # Cgroup allowlist
-├── block_stats          # Global statistics
-├── deny_cgroup_stats    # Per-cgroup stats
-├── deny_inode_stats     # Per-inode stats
-├── deny_path_stats      # Per-path stats
-├── agent_meta           # Layout version
-├── survival_allowlist   # Protected binaries
-├── deny_ipv4            # IPv4 deny list
-├── deny_ipv6            # IPv6 deny list
-├── deny_port            # Port deny list
-├── deny_cidr_v4         # IPv4 CIDR trie
-├── deny_cidr_v6         # IPv6 CIDR trie
-├── net_block_stats      # Network statistics
-├── net_ip_stats         # Per-IP statistics
-└── net_port_stats       # Per-port statistics
++-- deny_inode           # Inode deny map
++-- deny_path            # Path deny map
++-- allow_cgroup         # Cgroup allowlist
++-- block_stats          # Global statistics
++-- deny_cgroup_stats    # Per-cgroup stats
++-- deny_inode_stats     # Per-inode stats
++-- deny_path_stats      # Per-path stats
++-- agent_meta           # Layout version
++-- survival_allowlist   # Protected binaries
++-- deny_ipv4            # IPv4 deny list
++-- deny_ipv6            # IPv6 deny list
++-- deny_port            # Port deny list
++-- deny_cidr_v4         # IPv4 CIDR trie
++-- deny_cidr_v6         # IPv6 CIDR trie
++-- net_block_stats      # Network statistics
++-- net_ip_stats         # Per-IP statistics
++-- net_port_stats       # Per-port statistics
 ```
 
 ### Configuration Paths
 
 ```
 /etc/aegisbpf/
-├── keys/                # Trusted signing keys (*.pub)
-├── policy.conf          # Default policy file
-├── break_glass          # Break-glass trigger file
-├── break_glass.token    # Break-glass token
-└── aegis.bpf.sha256     # BPF object hash (override)
++-- keys/                # Trusted signing keys (*.pub)
++-- policy.conf          # Default policy file
++-- break_glass          # Break-glass trigger file
++-- break_glass.token    # Break-glass token
++-- aegis.bpf.sha256     # BPF object hash (override)
 
 /var/lib/aegisbpf/
-├── deny.db              # Persistent deny database
-├── policy.applied       # Last applied policy
-├── policy.applied.prev  # Previous policy (for rollback)
-├── policy.applied.sha256# Hash of applied policy
-├── version_counter      # Anti-rollback counter
-└── break_glass          # Alternative break-glass location
++-- deny.db              # Persistent deny database
++-- policy.applied       # Last applied policy
++-- policy.applied.prev  # Previous policy (for rollback)
++-- policy.applied.sha256# Hash of applied policy
++-- version_counter      # Anti-rollback counter
++-- break_glass          # Alternative break-glass location
 ```
 
 ### Installation Paths

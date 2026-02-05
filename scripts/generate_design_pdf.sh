@@ -20,8 +20,23 @@ fi
 
 DATE_UTC="$(date -u +"%Y-%m-%d")"
 GIT_SHA="$(git -C "$ROOT" rev-parse --short HEAD)"
+MONO_FONT=""
+MAIN_FONT=""
 
-tmp="$(mktemp)"
+if command -v fc-list >/dev/null 2>&1; then
+  if fc-list | grep -qi "DejaVu Sans Mono"; then
+    MONO_FONT="DejaVu Sans Mono"
+  elif fc-list | grep -qi "Noto Sans Mono"; then
+    MONO_FONT="Noto Sans Mono"
+  fi
+  if fc-list | grep -qi "DejaVu Serif"; then
+    MAIN_FONT="DejaVu Serif"
+  elif fc-list | grep -qi "Noto Serif"; then
+    MAIN_FONT="Noto Serif"
+  fi
+fi
+
+tmp="$(mktemp --suffix .md)"
 trap 'rm -f "$tmp"' EXIT
 
 cat >"$tmp" <<EOF
@@ -46,9 +61,19 @@ while IFS= read -r line; do
   fi
 done <"$SOURCES_FILE"
 
+args=()
+if [[ -n "$MONO_FONT" ]]; then
+  args+=("-V" "monofont=$MONO_FONT")
+fi
+if [[ -n "$MAIN_FONT" ]]; then
+  args+=("-V" "mainfont=$MAIN_FONT")
+fi
+
 pandoc "$tmp" \
+  --from=markdown \
   --pdf-engine=tectonic \
   --toc \
+  "${args[@]}" \
   -o "$OUTPUT"
 
 echo "Generated PDF: $OUTPUT"

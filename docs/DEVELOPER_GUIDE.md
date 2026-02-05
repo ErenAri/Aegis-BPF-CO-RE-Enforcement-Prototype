@@ -165,36 +165,36 @@ cmake --build build --target fuzz_policy fuzz_bundle fuzz_network
 
 ```
 aegisbpf/
-├── bpf/                    # BPF kernel code
-│   └── aegis.bpf.c         # Main BPF program
-├── src/                    # User-space C++ code
-│   ├── main.cpp            # Entry point
-│   ├── cli_*.cpp/hpp       # CLI command handlers
-│   ├── commands_*.cpp/hpp  # Command implementations
-│   ├── daemon.cpp/hpp      # Main daemon loop
-│   ├── bpf_ops.cpp/hpp     # BPF operations
-│   ├── policy.cpp/hpp      # Policy management
-│   ├── network_ops.cpp/hpp # Network rule handling
-│   ├── crypto.cpp/hpp      # Ed25519 signing
-│   ├── events.cpp/hpp      # Event handling
-│   ├── seccomp.cpp/hpp     # Seccomp filter
-│   ├── sha256.cpp/hpp      # SHA256 implementation
-│   ├── tweetnacl.c/h       # TweetNaCl crypto library
-│   ├── utils.cpp/hpp       # Utility functions
-│   ├── types.hpp           # Data structures
-│   ├── result.hpp          # Error handling
-│   └── logging.hpp         # Logging infrastructure
-├── tests/                  # Test code
-│   ├── test_*.cpp          # Unit tests
-│   ├── e2e/                # End-to-end tests
-│   ├── fuzz/               # Fuzzing harnesses
-│   └── fixtures/           # Test data
-├── docs/                   # Documentation
-├── config/                 # Configuration templates
-├── packaging/              # Systemd, AppArmor, SELinux
-├── scripts/                # Development and CI scripts
-├── helm/                   # Kubernetes Helm chart
-└── .github/workflows/      # CI/CD pipelines
++-- bpf/                    # BPF kernel code
+|   +-- aegis.bpf.c         # Main BPF program
++-- src/                    # User-space C++ code
+|   +-- main.cpp            # Entry point
+|   +-- cli_*.cpp/hpp       # CLI command handlers
+|   +-- commands_*.cpp/hpp  # Command implementations
+|   +-- daemon.cpp/hpp      # Main daemon loop
+|   +-- bpf_ops.cpp/hpp     # BPF operations
+|   +-- policy.cpp/hpp      # Policy management
+|   +-- network_ops.cpp/hpp # Network rule handling
+|   +-- crypto.cpp/hpp      # Ed25519 signing
+|   +-- events.cpp/hpp      # Event handling
+|   +-- seccomp.cpp/hpp     # Seccomp filter
+|   +-- sha256.cpp/hpp      # SHA256 implementation
+|   +-- tweetnacl.c/h       # TweetNaCl crypto library
+|   +-- utils.cpp/hpp       # Utility functions
+|   +-- types.hpp           # Data structures
+|   +-- result.hpp          # Error handling
+|   +-- logging.hpp         # Logging infrastructure
++-- tests/                  # Test code
+|   +-- test_*.cpp          # Unit tests
+|   +-- e2e/                # End-to-end tests
+|   +-- fuzz/               # Fuzzing harnesses
+|   +-- fixtures/           # Test data
++-- docs/                   # Documentation
++-- config/                 # Configuration templates
++-- packaging/              # Systemd, AppArmor, SELinux
++-- scripts/                # Development and CI scripts
++-- helm/                   # Kubernetes Helm chart
++-- .github/workflows/      # CI/CD pipelines
 ```
 
 ### Source File Conventions
@@ -212,12 +212,12 @@ aegisbpf/
 
 ```
 types.hpp         # Base types (no dependencies)
-    └── result.hpp    # Error handling (types.hpp)
-        └── logging.hpp   # Logging (result.hpp)
-            └── bpf_ops.hpp   # BPF operations
-            └── policy.hpp    # Policy management
-            └── crypto.hpp    # Cryptography
-            └── ...
+    +-- result.hpp    # Error handling (types.hpp)
+        +-- logging.hpp   # Logging (result.hpp)
+            +-- bpf_ops.hpp   # BPF operations
+            +-- policy.hpp    # Policy management
+            +-- crypto.hpp    # Cryptography
+            +-- ...
 ```
 
 ---
