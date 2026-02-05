@@ -104,8 +104,15 @@ Manage the cgroup allowlist.
 
 Manage policy files.
 
-**aegisbpf policy lint** *FILE*
+**aegisbpf policy lint** *FILE* [**--fix**] [**--out** *PATH*]
 :   Validate a policy file without applying it.
+
+**--fix**
+:   Emit a normalized policy file (sorted, deduped sections). Defaults to
+    `FILE.fixed` when **--out** is not provided.
+
+**--out** *PATH*
+:   Write the normalized policy output to the specified path.
 
 **aegisbpf policy apply** *FILE* [**--reset**] [**--sha256** *HEX*] [**--sha256-file** *PATH*] [**--no-rollback**]
 :   Apply a policy file. Options:
@@ -181,6 +188,41 @@ Checks:
 
 **--json**
 :   Emit a machine-readable status object with feature flags and per-check booleans.
+
+### doctor
+
+Detailed diagnostics with remediation guidance.
+
+**aegisbpf doctor** [**--json**]
+
+Shows:
+- Health check summary
+- Enforcement readiness (BPF LSM, BTF, bpffs)
+- Pinned map accessibility
+- Remediation hints for common failure modes
+
+**--json**
+:   Emit a machine-readable diagnostics payload with advice entries.
+
+### explain
+
+Explain a block decision from an event JSON payload.
+
+**aegisbpf explain** *EVENT.JSON* [**--policy** *FILE*] [**--json**]
+
+**EVENT.JSON**
+:   A single event JSON line (use `-` to read from stdin). Supports `type=block` events.
+
+**--policy** *FILE*
+:   Optional policy file to evaluate rule matches. Defaults to the applied policy
+    snapshot when present.
+
+**--json**
+:   Emit a machine-readable explanation payload.
+
+Notes:
+- Explanation is best-effort and uses the policy snapshot, not the kernel decision path.
+- Enforcement is inode-first: inode deny rules take precedence over path matches.
 
 ## POLICY FILE FORMAT
 

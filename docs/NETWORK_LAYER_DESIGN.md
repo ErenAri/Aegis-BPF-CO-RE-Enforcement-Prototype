@@ -11,37 +11,37 @@ This document specifies the architecture for adding network monitoring and enfor
 ### 1.1 High-Level Design
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        USER SPACE (aegisbpf daemon)                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│  CLI Parser  │  Policy Mgr  │  Event Handler  │  Metrics  │  Network   │
-│              │  (extended)  │  (extended)     │  Exporter │  Manager   │
-└──────────────────────────────┬──────────────────────────────────────────┘
-                               │ libbpf
-                               │
-          ┌────────────────────┴────────────────────┐
-          │                                         │
-┌─────────┴────────────────────┐  ┌────────────────┴─────────────────────┐
-│  BPF Maps (existing+new)     │  │  BPF Programs (existing+new)         │
-│  (pinned in bpffs)           │  │  (kernel space)                      │
-├──────────────────────────────┤  ├──────────────────────────────────────┤
-│ [EXISTING]                   │  │ [EXISTING]                           │
-│ deny_inode                   │  │ LSM: file_open                       │
-│ deny_path                    │  │ LSM: inode_permission                │
-│ allow_cgroup                 │  │ TP: sys_enter_openat                 │
-│ events (ringbuf)             │  │ TP: sched_*                          │
-│ block_stats                  │  │                                      │
-│ ...                          │  │ [NEW - NETWORK]                      │
-│                              │  │ LSM: socket_connect                  │
-│ [NEW - NETWORK]              │  │ LSM: socket_bind                     │
-│ deny_ipv4                    │  │ LSM: socket_listen                   │
-│ deny_ipv6                    │  │ LSM: socket_sendmsg (optional)       │
-│ deny_port                    │  │                                      │
-│ deny_cidr_v4                 │  │                                      │
-│ deny_cidr_v6                 │  │                                      │
-│ net_block_stats              │  │                                      │
-│ net_conn_stats               │  │                                      │
-└──────────────────────────────┘  └──────────────────────────────────────┘
++-------------------------------------------------------------------------+
+|                        USER SPACE (aegisbpf daemon)                     |
++-------------------------------------------------------------------------+
+|  CLI Parser  |  Policy Mgr  |  Event Handler  |  Metrics  |  Network   |
+|              |  (extended)  |  (extended)     |  Exporter |  Manager   |
++------------------------------+------------------------------------------+
+                               | libbpf
+                               |
+          +--------------------+--------------------+
+          |                                         |
++---------+--------------------+  +----------------+---------------------+
+|  BPF Maps (existing+new)     |  |  BPF Programs (existing+new)         |
+|  (pinned in bpffs)           |  |  (kernel space)                      |
++------------------------------+  +--------------------------------------+
+| [EXISTING]                   |  | [EXISTING]                           |
+| deny_inode                   |  | LSM: file_open                       |
+| deny_path                    |  | LSM: inode_permission                |
+| allow_cgroup                 |  | TP: sys_enter_openat                 |
+| events (ringbuf)             |  | TP: sched_*                          |
+| block_stats                  |  |                                      |
+| ...                          |  | [NEW - NETWORK]                      |
+|                              |  | LSM: socket_connect                  |
+| [NEW - NETWORK]              |  | LSM: socket_bind                     |
+| deny_ipv4                    |  | LSM: socket_listen                   |
+| deny_ipv6                    |  | LSM: socket_sendmsg (optional)       |
+| deny_port                    |  |                                      |
+| deny_cidr_v4                 |  |                                      |
+| deny_cidr_v6                 |  |                                      |
+| net_block_stats              |  |                                      |
+| net_conn_stats               |  |                                      |
++------------------------------+  +--------------------------------------+
 ```
 
 ### 1.2 Design Principles
@@ -423,13 +423,13 @@ aegisbpf stats --all  # File + network stats
 
 ```
 src/
-├── network_ops.hpp      # Network BPF map operations
-├── network_ops.cpp
-├── network_policy.hpp   # Network policy parsing
-├── network_policy.cpp
-├── network_events.hpp   # Network event handling
-├── network_events.cpp
-└── network_types.hpp    # Network-specific types
++-- network_ops.hpp      # Network BPF map operations
++-- network_ops.cpp
++-- network_policy.hpp   # Network policy parsing
++-- network_policy.cpp
++-- network_events.hpp   # Network event handling
++-- network_events.cpp
++-- network_types.hpp    # Network-specific types
 ```
 
 ### 5.3 BpfState Extension

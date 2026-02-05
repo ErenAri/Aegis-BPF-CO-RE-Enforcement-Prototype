@@ -20,3 +20,5 @@ coverage.css
 coverage.js
 __pycache__/
 *.pyc
+.tools/
+docs/_internal/

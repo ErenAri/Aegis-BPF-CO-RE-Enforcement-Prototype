@@ -4,9 +4,6 @@ This checklist captures the minimum bar for a senior-level, production-ready
 release. Items are grouped by priority. Track completion and evidence as you
 deliver each requirement.
 
-For phase-by-phase numeric gates and the current MVP freeze contract, see
-`docs/MATURITY_PROGRAM.md`.
-
 ## P0 (must-have before production)
 - Policy format is versioned, validated, and backward-compatible (or has a
   clear migration plan).
@@ -37,6 +34,7 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 ## Evidence log (fill as you complete)
 - CI build matrix: GitHub Actions on ubuntu-22.04 and ubuntu-24.04 + arm64 build via QEMU
 - Health check command: `./build/aegisbpf health`
+- Diagnostic command: `./build/aegisbpf doctor [--json]`
 - Policy lifecycle: lint/apply/export/show/rollback with v1 format
 - Policy integrity: sha256 verification via `policy apply --sha256` or env vars
 - Packaging: systemd unit in `packaging/systemd/` + CPack TGZ/DEB/RPM
@@ -49,6 +47,7 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Enforce smoke test: `scripts/smoke_enforce.sh`
 - Audit smoke test: `scripts/smoke_audit.sh`
 - Audit fallback smoke test: `scripts/smoke_audit_fallback.sh`
+- Reference enforcement slice: `scripts/reference_enforcement_slice.sh`
 - Environment verification: `scripts/verify_env.sh [--strict]`
 - Event schema validation: `scripts/validate_event_schema.py` + `tests/event_samples/`
 - Failure-mode regression contract: `tests/check_failure_modes_contract.py` (parser, signature, map-full, verifier, rollback paths)
@@ -59,8 +58,8 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Security automation: `.github/workflows/security.yml` (CodeQL, dependency review, gitleaks)
 - Dependency update automation: `.github/dependabot.yml` (GitHub Actions) + `renovate.json` (CMake/regex-managed deps)
 - E2E workflow: `.github/workflows/e2e.yml`
-- Kernel file-enforcement matrix (66 logical checks): `scripts/e2e_file_enforcement_matrix.sh` (run from `.github/workflows/e2e.yml` and `.github/workflows/kernel-matrix.yml` with summary/metadata artifacts, including `skipped_checks` when bind-mount alias checks cannot run)
-- Kernel matrix summary validator: `scripts/validate_e2e_matrix_summary.py` (`--min-total-checks 60 --max-failed-checks 0`)
+- Kernel file-enforcement matrix (114 logical checks): `scripts/e2e_file_enforcement_matrix.sh` (run from `.github/workflows/e2e.yml` and `.github/workflows/kernel-matrix.yml` with summary/metadata artifacts, including `skipped_checks` when bind-mount alias checks cannot run)
+- Kernel matrix summary validator: `scripts/validate_e2e_matrix_summary.py` (`--min-total-checks 100 --max-failed-checks 0`)
 - Soak reliability workflow: `.github/workflows/soak.yml` + `scripts/soak_reliability.sh`
 - Staging canary workflow: `.github/workflows/canary.yml` + `scripts/canary_gate.sh`
 - Perf regression workflow: `.github/workflows/perf.yml`
@@ -84,22 +83,8 @@ For phase-by-phase numeric gates and the current MVP freeze contract, see
 - Threat model and bypass boundaries: `docs/THREAT_MODEL.md`
 - Policy runtime semantics: `docs/POLICY_SEMANTICS.md`
 - Metrics interpretation guide: `docs/METRICS_OPERATIONS.md`
-- Maturity phase gates and done criteria: `docs/MATURITY_PROGRAM.md`
-- Market-leadership execution plan: `docs/MARKET_LEADERSHIP_PLAN.md`
-- Market-leadership release scorecard: `docs/MARKET_SCORECARD.md`
-- External review prep checklist: `docs/EXTERNAL_REVIEW_PREP.md`
-- Pilot evidence template: `docs/PILOT_EVIDENCE_TEMPLATE.md`
-- External review closure tracker: `docs/EXTERNAL_REVIEW_STATUS.md`
-- Pilot weekly evidence reports: `docs/pilots/`
-- Design artifact synchronization status (root PDF vs docs): `docs/DESIGN_ARTIFACT_STATUS.md`
-- Phase-1 product-contract evidence pack: `docs/PHASE1_PRODUCT_CONTRACT_EVIDENCE.md`
-- Phase-2 correctness evidence pack: `docs/PHASE2_CORRECTNESS_EVIDENCE.md`
-- Phase-3 operational safety evidence pack: `docs/PHASE3_OPERATIONAL_SAFETY_EVIDENCE.md`
-- Phase-4 portability evidence pack: `docs/PHASE4_PORTABILITY_EVIDENCE.md`
-- Phase-5 performance evidence pack: `docs/PHASE5_PERFORMANCE_EVIDENCE.md`
-- Phase-6 meta-security evidence pack: `docs/PHASE6_META_SECURITY_EVIDENCE.md`
-- Phase-7 reviewability evidence pack: `docs/PHASE7_REVIEWABILITY_EVIDENCE.md`
+- Explainability CLI: `aegisbpf explain` (see `docs/PRODUCTION_DEPLOYMENT_BLUEPRINT.md`)
+- Production deployment blueprint: `docs/PRODUCTION_DEPLOYMENT_BLUEPRINT.md`
 - CI kernel-e2e execution strategy: `docs/CI_EXECUTION_STRATEGY.md`
-- Final go/no-go checklist: `docs/GO_LIVE_CHECKLIST.md`
 - Branch-protection baseline: `docs/BRANCH_PROTECTION.md` + `scripts/check_branch_protection.sh`
 - Branch-protection audit workflow: `.github/workflows/branch-protection-audit.yml`

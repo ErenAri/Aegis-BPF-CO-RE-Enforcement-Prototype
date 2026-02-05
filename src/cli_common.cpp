@@ -15,13 +15,15 @@ int usage(const char* prog)
               << " | network deny {list|clear}"
               << " | network stats"
               << " | survival {list|verify}"
-              << " | policy {lint|validate|apply|export} <file> [--reset] [--sha256 <hex>|--sha256-file <path>] [--no-rollback] [--require-signature] [--verbose]"
+              << " | policy {lint|validate|apply|export} <file> [--fix] [--out <path>] [--reset] [--sha256 <hex>|--sha256-file <path>] [--no-rollback] [--require-signature] [--verbose]"
               << " | policy sign <policy.conf> --key <private.key> --output <policy.signed>"
               << " | policy {show|rollback}"
               << " | keys {list|add <pubkey.pub>}"
               << " | stats [--detailed]"
               << " | metrics [--out <path>] [--detailed]"
-              << " | health [--json]" << std::endl;
+              << " | health [--json]"
+              << " | doctor [--json]"
+              << " | explain <event.json> [--policy <path>] [--json]" << std::endl;
     return 1;
 }
 

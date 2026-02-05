@@ -9,13 +9,16 @@
 #include "kernel_features.hpp"
 #include "logging.hpp"
 #include "network_ops.hpp"
+#include "policy.hpp"
 #include "tracing.hpp"
 #include "types.hpp"
 #include "utils.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -84,7 +87,168 @@ Result<void> verify_pinned_map_access(const char* pin_path)
     return {};
 }
 
+struct ExplainEvent {
+    std::string type;
+    std::string path;
+    std::string resolved_path;
+    std::string cgroup_path;
+    std::string action;
+    uint64_t ino = 0;
+    uint64_t dev = 0;
+    uint64_t cgid = 0;
+    bool has_ino = false;
+    bool has_dev = false;
+    bool has_cgid = false;
+};
+
+std::string read_stream(std::istream& in)
+{
+    std::ostringstream oss;
+    oss << in.rdbuf();
+    return oss.str();
+}
+
+bool find_json_value_start(const std::string& json, const std::string& key, size_t& pos)
+{
+    const std::string needle = "\"" + key + "\"";
+    size_t key_pos = json.find(needle);
+    if (key_pos == std::string::npos) {
+        return false;
+    }
+    size_t colon = json.find(':', key_pos + needle.size());
+    if (colon == std::string::npos) {
+        return false;
+    }
+    pos = colon + 1;
+    while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) {
+        ++pos;
+    }
+    return pos < json.size();
+}
+
+bool extract_json_string(const std::string& json, const std::string& key, std::string& out)
+{
+    size_t pos = 0;
+    if (!find_json_value_start(json, key, pos)) {
+        return false;
+    }
+    if (json[pos] != '"') {
+        return false;
+    }
+    ++pos;
+    std::string result;
+    bool escape = false;
+    for (; pos < json.size(); ++pos) {
+        char c = json[pos];
+        if (escape) {
+            switch (c) {
+            case '"':
+                result.push_back('"');
+                break;
+            case '\\':
+                result.push_back('\\');
+                break;
+            case 'n':
+                result.push_back('\n');
+                break;
+            case 'r':
+                result.push_back('\r');
+                break;
+            case 't':
+                result.push_back('\t');
+                break;
+            default:
+                result.push_back(c);
+                break;
+            }
+            escape = false;
+            continue;
+        }
+        if (c == '\\') {
+            escape = true;
+            continue;
+        }
+        if (c == '"') {
+            out = result;
+            return true;
+        }
+        result.push_back(c);
+    }
+    return false;
+}
+
+bool extract_json_uint64(const std::string& json, const std::string& key, uint64_t& out)
+{
+    size_t pos = 0;
+    if (!find_json_value_start(json, key, pos)) {
+        return false;
+    }
+    std::string token;
+    while (pos < json.size() && std::isdigit(static_cast<unsigned char>(json[pos]))) {
+        token.push_back(json[pos]);
+        ++pos;
+    }
+    if (token.empty()) {
+        return false;
+    }
+    return parse_uint64(token, out);
+}
+
+bool parse_explain_event(const std::string& json, ExplainEvent& out, std::string& error)
+{
+    if (!extract_json_string(json, "type", out.type)) {
+        error = "Event JSON missing required 'type' field";
+        return false;
+    }
+    extract_json_string(json, "path", out.path);
+    extract_json_string(json, "resolved_path", out.resolved_path);
+    extract_json_string(json, "cgroup_path", out.cgroup_path);
+    extract_json_string(json, "action", out.action);
+
+    uint64_t value = 0;
+    if (extract_json_uint64(json, "ino", value)) {
+        out.ino = value;
+        out.has_ino = true;
+    }
+    if (extract_json_uint64(json, "dev", value)) {
+        out.dev = value;
+        out.has_dev = true;
+    }
+    if (extract_json_uint64(json, "cgid", value)) {
+        out.cgid = value;
+        out.has_cgid = true;
+    }
+    return true;
+}
+
 }  // namespace
+
+std::string build_block_metrics_output(const BlockStats& stats)
+{
+    std::ostringstream oss;
+    append_metric_header(oss, "aegisbpf_blocks_total", "counter",
+                         "Total number of blocked operations");
+    append_metric_sample(oss, "aegisbpf_blocks_total", stats.blocks);
+    append_metric_header(oss, "aegisbpf_ringbuf_drops_total", "counter",
+                         "Number of dropped events");
+    append_metric_sample(oss, "aegisbpf_ringbuf_drops_total", stats.ringbuf_drops);
+    return oss.str();
+}
+
+std::string build_net_metrics_output(const NetBlockStats& stats)
+{
+    std::ostringstream oss;
+    append_metric_header(oss, "aegisbpf_net_blocks_total", "counter",
+                         "Blocked network operations by direction");
+    append_metric_sample(oss, "aegisbpf_net_blocks_total", {{"type", "connect"}},
+                         stats.connect_blocks);
+    append_metric_sample(oss, "aegisbpf_net_blocks_total", {{"type", "bind"}},
+                         stats.bind_blocks);
+    append_metric_header(oss, "aegisbpf_net_ringbuf_drops_total", "counter",
+                         "Dropped network events");
+    append_metric_sample(oss, "aegisbpf_net_ringbuf_drops_total", stats.ringbuf_drops);
+    return oss.str();
+}
 
 int cmd_stats(bool detailed)
 {
@@ -399,34 +563,13 @@ int cmd_metrics(const std::string& out_path, bool detailed)
     return 0;
 }
 
-int cmd_health(bool json_output)
-{
-    const std::string trace_id = make_span_id("trace-health");
-    ScopedSpan root_span("cli.health", trace_id);
-    auto fail = [&](const std::string& error) -> int {
-        root_span.fail(error);
-        return 1;
-    };
-
-    ScopedSpan feature_span("health.detect_kernel_features", trace_id, root_span.span_id());
-    auto features_result = detect_kernel_features();
-    if (!features_result) {
-        feature_span.fail(features_result.error().to_string());
-        if (json_output) {
-            std::cout << "{\"ok\":false,\"error\":\""
-                      << json_escape(features_result.error().to_string())
-                      << "\"}" << std::endl;
-        }
-        else {
-            logger().log(SLOG_ERROR("Kernel feature detection failed")
-                             .field("error", features_result.error().to_string()));
-        }
-        return fail(features_result.error().to_string());
-    }
-    const auto& features = *features_result;
-    EnforcementCapability capability = determine_capability(features);
-    bool bpffs_mounted = check_bpffs_mounted();
-
+struct HealthReport {
+    bool ok = false;
+    std::string error;
+    KernelFeatures features{};
+    EnforcementCapability capability = EnforcementCapability::Disabled;
+    std::string kernel_version = "unknown";
+    bool bpffs_mounted = false;
     bool prereqs_ok = false;
     bool bpf_load_ok = false;
     bool required_maps_ok = false;
@@ -434,110 +577,72 @@ int cmd_health(bool json_output)
     bool required_pins_ok = false;
     bool network_maps_present = false;
     bool network_pins_ok = true;
+};
 
-    auto emit_json = [&](bool ok, const std::string& error) {
-        std::ostringstream out;
-        out << "{"
-            << "\"ok\":" << (ok ? "true" : "false")
-            << ",\"capability\":\"" << json_escape(capability_name(capability)) << "\""
-            << ",\"mode\":\"" << (capability == EnforcementCapability::AuditOnly ? "audit-only" : "enforce") << "\""
-            << ",\"kernel_version\":\"" << json_escape(features.kernel_version) << "\""
-            << ",\"features\":{"
-            << "\"bpf_lsm\":" << (features.bpf_lsm ? "true" : "false")
-            << ",\"cgroup_v2\":" << (features.cgroup_v2 ? "true" : "false")
-            << ",\"btf\":" << (features.btf ? "true" : "false")
-            << ",\"bpf_syscall\":" << (features.bpf_syscall ? "true" : "false")
-            << ",\"ringbuf\":" << (features.ringbuf ? "true" : "false")
-            << ",\"tracepoints\":" << (features.tracepoints ? "true" : "false")
-            << ",\"bpffs\":" << (bpffs_mounted ? "true" : "false")
-            << "}"
-            << ",\"checks\":{"
-            << "\"prereqs\":" << (prereqs_ok ? "true" : "false")
-            << ",\"bpf_load\":" << (bpf_load_ok ? "true" : "false")
-            << ",\"required_maps\":" << (required_maps_ok ? "true" : "false")
-            << ",\"layout_version\":" << (layout_ok ? "true" : "false")
-            << ",\"required_pins\":" << (required_pins_ok ? "true" : "false")
-            << ",\"network_pins\":" << (network_pins_ok ? "true" : "false")
-            << "}"
-            << ",\"network_maps_present\":" << (network_maps_present ? "true" : "false");
-        if (!error.empty()) {
-            out << ",\"error\":\"" << json_escape(error) << "\"";
-        }
-        out << "}";
-        std::cout << out.str() << std::endl;
-    };
+struct DoctorAdvice {
+    std::string code;
+    std::string message;
+    std::string remediation;
+};
 
-    if (!json_output) {
-        std::cout << "Kernel version: " << features.kernel_version << std::endl;
-        std::cout << "Capability: " << capability_name(capability) << std::endl;
-        std::cout << "Features:" << std::endl;
-        std::cout << "  bpf_lsm: " << (features.bpf_lsm ? "yes" : "no") << std::endl;
-        std::cout << "  cgroup_v2: " << (features.cgroup_v2 ? "yes" : "no") << std::endl;
-        std::cout << "  btf: " << (features.btf ? "yes" : "no") << std::endl;
-        std::cout << "  bpf_syscall: " << (features.bpf_syscall ? "yes" : "no") << std::endl;
-        std::cout << "  ringbuf: " << (features.ringbuf ? "yes" : "no") << std::endl;
-        std::cout << "  tracepoints: " << (features.tracepoints ? "yes" : "no") << std::endl;
-        std::cout << "  bpffs: " << (bpffs_mounted ? "yes" : "no") << std::endl;
+HealthReport collect_health_report(const std::string& trace_id, const std::string& parent_span_id)
+{
+    HealthReport report;
+
+    ScopedSpan feature_span("health.detect_kernel_features", trace_id, parent_span_id);
+    auto features_result = detect_kernel_features();
+    if (!features_result) {
+        feature_span.fail(features_result.error().to_string());
+        logger().log(SLOG_ERROR("Kernel feature detection failed")
+                         .field("error", features_result.error().to_string()));
+        report.error = features_result.error().to_string();
+        return report;
     }
+    report.features = *features_result;
+    report.kernel_version = report.features.kernel_version;
+    report.capability = determine_capability(report.features);
+    report.bpffs_mounted = check_bpffs_mounted();
 
-    prereqs_ok = features.cgroup_v2 && features.btf && features.bpf_syscall &&
-                 bpffs_mounted && capability != EnforcementCapability::Disabled;
-    if (!prereqs_ok) {
-        std::string error = "Kernel prerequisites are not met: " +
-                            capability_explanation(features, capability);
-        if (json_output) {
-            emit_json(false, error);
-        }
-        else {
-            logger().log(SLOG_ERROR("Kernel prerequisites are not met")
-                             .field("explanation", capability_explanation(features, capability)));
-        }
-        return fail(error);
+    report.prereqs_ok = report.features.cgroup_v2 && report.features.btf &&
+                        report.features.bpf_syscall && report.bpffs_mounted &&
+                        report.capability != EnforcementCapability::Disabled;
+    if (!report.prereqs_ok) {
+        report.error = "Kernel prerequisites are not met: " +
+                       capability_explanation(report.features, report.capability);
+        logger().log(SLOG_ERROR("Kernel prerequisites are not met")
+                         .field("explanation", capability_explanation(report.features, report.capability)));
+        return report;
     }
 
     BpfState state;
-    ScopedSpan load_span("health.load_bpf", trace_id, root_span.span_id());
+    ScopedSpan load_span("health.load_bpf", trace_id, parent_span_id);
     auto load_result = load_bpf(true, false, state);
     if (!load_result) {
         load_span.fail(load_result.error().to_string());
-        if (json_output) {
-            emit_json(false, "BPF load failed: " + load_result.error().to_string());
-        }
-        else {
-            logger().log(SLOG_ERROR("BPF health check failed - cannot load BPF object")
-                             .field("error", load_result.error().to_string()));
-        }
-        return fail(load_result.error().to_string());
+        logger().log(SLOG_ERROR("BPF health check failed - cannot load BPF object")
+                         .field("error", load_result.error().to_string()));
+        report.error = "BPF load failed: " + load_result.error().to_string();
+        return report;
     }
-    bpf_load_ok = true;
+    report.bpf_load_ok = true;
 
-    // Check required maps exist
     if (!state.deny_inode || !state.deny_path || !state.allow_cgroup || !state.events) {
-        if (json_output) {
-            emit_json(false, "BPF health check failed - missing required maps");
-        }
-        else {
-            logger().log(SLOG_ERROR("BPF health check failed - missing required maps"));
-        }
-        return fail("BPF health check failed - missing required maps");
+        logger().log(SLOG_ERROR("BPF health check failed - missing required maps"));
+        report.error = "BPF health check failed - missing required maps";
+        return report;
     }
-    required_maps_ok = true;
+    report.required_maps_ok = true;
 
-    // Check layout version by ensuring it
-    ScopedSpan layout_span("health.ensure_layout_version", trace_id, root_span.span_id());
+    ScopedSpan layout_span("health.ensure_layout_version", trace_id, parent_span_id);
     auto version_result = ensure_layout_version(state);
     if (!version_result) {
         layout_span.fail(version_result.error().to_string());
-        if (json_output) {
-            emit_json(false, "Layout version check failed: " + version_result.error().to_string());
-        }
-        else {
-            logger().log(SLOG_ERROR("BPF health check failed - layout version check failed")
-                             .field("error", version_result.error().to_string()));
-        }
-        return fail(version_result.error().to_string());
+        logger().log(SLOG_ERROR("BPF health check failed - layout version check failed")
+                         .field("error", version_result.error().to_string()));
+        report.error = "Layout version check failed: " + version_result.error().to_string();
+        return report;
     }
-    layout_ok = true;
+    report.layout_ok = true;
 
     const std::array<const char*, 9> required_pin_paths = {
         kDenyInodePin,
@@ -553,21 +658,15 @@ int cmd_health(bool json_output)
     for (const char* pin_path : required_pin_paths) {
         auto pin_result = verify_pinned_map_access(pin_path);
         if (!pin_result) {
-            if (json_output) {
-                emit_json(false, std::string("Pinned map check failed: ") + pin_path + " (" +
-                                     pin_result.error().to_string() + ")");
-            }
-            else {
-                logger().log(SLOG_ERROR("Pinned map check failed")
-                                 .field("path", pin_path)
-                                 .field("error", pin_result.error().to_string()));
-            }
-            return fail("Pinned map check failed: " + std::string(pin_path));
+            logger().log(SLOG_ERROR("Pinned map check failed")
+                             .field("path", pin_path)
+                             .field("error", pin_result.error().to_string()));
+            report.error = "Pinned map check failed: " + std::string(pin_path);
+            return report;
         }
     }
-    required_pins_ok = true;
+    report.required_pins_ok = true;
 
-    // Network maps are optional; validate pin paths only for maps present in the loaded object.
     const std::array<std::pair<bpf_map*, const char*>, 8> optional_network_maps = {{
         {state.deny_ipv4, kDenyIpv4Pin},
         {state.deny_ipv6, kDenyIpv6Pin},
@@ -582,35 +681,438 @@ int cmd_health(bool json_output)
         if (!map) {
             continue;
         }
-        network_maps_present = true;
+        report.network_maps_present = true;
         auto pin_result = verify_pinned_map_access(pin_path);
         if (!pin_result) {
-            network_pins_ok = false;
-            if (json_output) {
-                emit_json(false, std::string("Network pinned map check failed: ") + pin_path + " (" +
-                                     pin_result.error().to_string() + ")");
-            }
-            else {
-                logger().log(SLOG_ERROR("Network pinned map check failed")
-                                 .field("path", pin_path)
-                                 .field("error", pin_result.error().to_string()));
-            }
-            return fail("Network pinned map check failed: " + std::string(pin_path));
+            report.network_pins_ok = false;
+            logger().log(SLOG_ERROR("Network pinned map check failed")
+                             .field("path", pin_path)
+                             .field("error", pin_result.error().to_string()));
+            report.error = "Network pinned map check failed: " + std::string(pin_path);
+            return report;
         }
     }
 
+    report.ok = true;
+    return report;
+}
+
+std::string build_health_json(const HealthReport& report)
+{
+    std::ostringstream out;
+    out << "{"
+        << "\"ok\":" << (report.ok ? "true" : "false")
+        << ",\"capability\":\"" << json_escape(capability_name(report.capability)) << "\""
+        << ",\"mode\":\"" << (report.capability == EnforcementCapability::AuditOnly ? "audit-only" : "enforce") << "\""
+        << ",\"kernel_version\":\"" << json_escape(report.kernel_version) << "\""
+        << ",\"features\":{"
+        << "\"bpf_lsm\":" << (report.features.bpf_lsm ? "true" : "false")
+        << ",\"cgroup_v2\":" << (report.features.cgroup_v2 ? "true" : "false")
+        << ",\"btf\":" << (report.features.btf ? "true" : "false")
+        << ",\"bpf_syscall\":" << (report.features.bpf_syscall ? "true" : "false")
+        << ",\"ringbuf\":" << (report.features.ringbuf ? "true" : "false")
+        << ",\"tracepoints\":" << (report.features.tracepoints ? "true" : "false")
+        << ",\"bpffs\":" << (report.bpffs_mounted ? "true" : "false")
+        << "}"
+        << ",\"checks\":{"
+        << "\"prereqs\":" << (report.prereqs_ok ? "true" : "false")
+        << ",\"bpf_load\":" << (report.bpf_load_ok ? "true" : "false")
+        << ",\"required_maps\":" << (report.required_maps_ok ? "true" : "false")
+        << ",\"layout_version\":" << (report.layout_ok ? "true" : "false")
+        << ",\"required_pins\":" << (report.required_pins_ok ? "true" : "false")
+        << ",\"network_pins\":" << (report.network_pins_ok ? "true" : "false")
+        << "}"
+        << ",\"network_maps_present\":" << (report.network_maps_present ? "true" : "false");
+    if (!report.error.empty()) {
+        out << ",\"error\":\"" << json_escape(report.error) << "\"";
+    }
+    out << "}";
+    return out.str();
+}
+
+void emit_health_json(const HealthReport& report)
+{
+    std::cout << build_health_json(report) << std::endl;
+}
+
+std::vector<DoctorAdvice> build_doctor_advice(const HealthReport& report)
+{
+    std::vector<DoctorAdvice> advice;
+    if (!report.features.bpf_lsm) {
+        advice.push_back({"bpf_lsm_disabled",
+                          "BPF LSM is not enabled; enforcement will be audit-only.",
+                          "Enable BPF LSM via kernel command line (lsm=...,...,bpf) and reboot."});
+    }
+    if (!report.features.btf) {
+        advice.push_back({"missing_btf",
+                          "Kernel BTF is missing; verifier compatibility is reduced.",
+                          "Use a kernel built with CONFIG_DEBUG_INFO_BTF=y."});
+    }
+    if (!report.bpffs_mounted) {
+        advice.push_back({"bpffs_unmounted",
+                          "bpffs is not mounted at /sys/fs/bpf.",
+                          "Mount bpffs: sudo mount -t bpf bpffs /sys/fs/bpf."});
+    }
+    if (report.capability == EnforcementCapability::AuditOnly) {
+        advice.push_back({"audit_only",
+                          "Enforcement capability is audit-only.",
+                          "Ensure BPF LSM is enabled to allow deny enforcement."});
+    }
+    if (!report.bpf_load_ok) {
+        advice.push_back({"bpf_load_failed",
+                          "Failed to load BPF programs.",
+                          "Check kernel logs and verify libbpf, BTF, and permissions."});
+    }
+    if (!report.layout_ok) {
+        advice.push_back({"layout_mismatch",
+                          "Pinned map layout mismatch detected.",
+                          "Run 'sudo aegisbpf block clear' to reset pinned maps."});
+    }
+    if (report.network_maps_present && !report.network_pins_ok) {
+        advice.push_back({"network_pins",
+                          "Network pinned map access failed.",
+                          "Verify bpffs permissions and pinned network maps."});
+    }
+    return advice;
+}
+
+void emit_doctor_text(const HealthReport& report, const std::vector<DoctorAdvice>& advice)
+{
+    std::cout << "AegisBPF Doctor" << std::endl;
+    std::cout << "status: " << (report.ok ? "ok" : "error") << std::endl;
+    std::cout << "capability: " << capability_name(report.capability) << std::endl;
+    std::cout << "kernel: " << report.kernel_version << std::endl;
+    std::cout << "checks: prereqs=" << (report.prereqs_ok ? "ok" : "fail")
+              << " bpf_load=" << (report.bpf_load_ok ? "ok" : "fail")
+              << " required_maps=" << (report.required_maps_ok ? "ok" : "fail")
+              << " layout=" << (report.layout_ok ? "ok" : "fail")
+              << " required_pins=" << (report.required_pins_ok ? "ok" : "fail")
+              << " network_pins=" << (report.network_pins_ok ? "ok" : "fail")
+              << std::endl;
+    if (!report.error.empty()) {
+        std::cout << "error: " << report.error << std::endl;
+    }
+    if (advice.empty()) {
+        std::cout << "advice: none" << std::endl;
+        return;
+    }
+    std::cout << "advice:" << std::endl;
+    for (const auto& item : advice) {
+        std::cout << "- [" << item.code << "] " << item.message << std::endl;
+        if (!item.remediation.empty()) {
+            std::cout << "  remediation: " << item.remediation << std::endl;
+        }
+    }
+}
+
+void emit_doctor_json(const HealthReport& report, const std::vector<DoctorAdvice>& advice)
+{
+    std::ostringstream out;
+    out << "{"
+        << "\"ok\":" << (report.ok ? "true" : "false")
+        << ",\"report\":" << build_health_json(report)
+        << ",\"advice\":[";
+    for (size_t i = 0; i < advice.size(); ++i) {
+        const auto& item = advice[i];
+        if (i > 0) {
+            out << ",";
+        }
+        out << "{"
+            << "\"code\":\"" << json_escape(item.code) << "\""
+            << ",\"message\":\"" << json_escape(item.message) << "\"";
+        if (!item.remediation.empty()) {
+            out << ",\"remediation\":\"" << json_escape(item.remediation) << "\"";
+        }
+        out << "}";
+    }
+    out << "]}";
+    std::cout << out.str() << std::endl;
+}
+
+int cmd_health(bool json_output)
+{
+    const std::string trace_id = make_span_id("trace-health");
+    ScopedSpan root_span("cli.health", trace_id);
+    auto fail = [&](const std::string& error) -> int {
+        root_span.fail(error);
+        return 1;
+    };
+    HealthReport report = collect_health_report(trace_id, root_span.span_id());
+
     if (json_output) {
-        emit_json(true, std::string());
-        return 0;
+        emit_health_json(report);
+        return report.ok ? 0 : 1;
     }
 
-    if (capability == EnforcementCapability::AuditOnly) {
+    std::cout << "Kernel version: " << report.kernel_version << std::endl;
+    std::cout << "Capability: " << capability_name(report.capability) << std::endl;
+    std::cout << "Features:" << std::endl;
+    std::cout << "  bpf_lsm: " << (report.features.bpf_lsm ? "yes" : "no") << std::endl;
+    std::cout << "  cgroup_v2: " << (report.features.cgroup_v2 ? "yes" : "no") << std::endl;
+    std::cout << "  btf: " << (report.features.btf ? "yes" : "no") << std::endl;
+    std::cout << "  bpf_syscall: " << (report.features.bpf_syscall ? "yes" : "no") << std::endl;
+    std::cout << "  ringbuf: " << (report.features.ringbuf ? "yes" : "no") << std::endl;
+    std::cout << "  tracepoints: " << (report.features.tracepoints ? "yes" : "no") << std::endl;
+    std::cout << "  bpffs: " << (report.bpffs_mounted ? "yes" : "no") << std::endl;
+
+    if (!report.ok) {
+        return fail(report.error.empty() ? "Health check failed" : report.error);
+    }
+
+    if (report.capability == EnforcementCapability::AuditOnly) {
         std::cout << "Health check passed (audit-only capability)" << std::endl;
         std::cout << "  Note: BPF LSM is unavailable; enforcement actions run in audit mode." << std::endl;
         return 0;
     }
 
     std::cout << "Health check passed" << std::endl;
+    return 0;
+}
+
+int cmd_doctor(bool json_output)
+{
+    const std::string trace_id = make_span_id("trace-doctor");
+    ScopedSpan root_span("cli.doctor", trace_id);
+
+    HealthReport report = collect_health_report(trace_id, root_span.span_id());
+    auto advice = build_doctor_advice(report);
+
+    if (!report.ok && !report.error.empty()) {
+        root_span.fail(report.error);
+    }
+
+    if (json_output) {
+        emit_doctor_json(report, advice);
+        return report.ok ? 0 : 1;
+    }
+
+    emit_doctor_text(report, advice);
+    return report.ok ? 0 : 1;
+}
+
+int cmd_explain(const std::string& event_path, const std::string& policy_path, bool json_output)
+{
+    std::string payload;
+    if (event_path == "-") {
+        payload = read_stream(std::cin);
+    }
+    else {
+        std::ifstream in(event_path);
+        if (!in.is_open()) {
+            logger().log(SLOG_ERROR("Failed to open event file")
+                             .field("path", event_path)
+                             .error_code(errno));
+            return 1;
+        }
+        payload = read_stream(in);
+    }
+
+    ExplainEvent event{};
+    std::string parse_error;
+    if (!parse_explain_event(payload, event, parse_error)) {
+        logger().log(SLOG_ERROR("Failed to parse event JSON")
+                         .field("error", parse_error));
+        return 1;
+    }
+
+    if (event.type != "block") {
+        logger().log(SLOG_ERROR("Explain currently supports block events only")
+                         .field("type", event.type));
+        return 1;
+    }
+
+    std::string policy_source = policy_path;
+    if (policy_source.empty() && std::filesystem::exists(kPolicyAppliedPath)) {
+        policy_source = kPolicyAppliedPath;
+    }
+
+    Policy policy{};
+    bool policy_loaded = false;
+    if (!policy_source.empty()) {
+        PolicyIssues issues{};
+        auto policy_result = parse_policy_file(policy_source, issues);
+        report_policy_issues(issues);
+        if (!policy_result) {
+            logger().log(SLOG_ERROR("Failed to parse policy for explain")
+                             .field("path", policy_source)
+                             .field("error", policy_result.error().to_string()));
+            return 1;
+        }
+        if (issues.has_errors()) {
+            logger().log(SLOG_ERROR("Policy contains errors; cannot explain decision")
+                             .field("path", policy_source));
+            return 1;
+        }
+        policy = *policy_result;
+        policy_loaded = true;
+    }
+
+    bool allow_match = false;
+    bool deny_inode_match = false;
+    bool deny_path_match = false;
+
+    if (policy_loaded) {
+        if (event.has_cgid) {
+            for (uint64_t id : policy.allow_cgroup_ids) {
+                if (id == event.cgid) {
+                    allow_match = true;
+                    break;
+                }
+            }
+        }
+        if (!allow_match && !event.cgroup_path.empty()) {
+            for (const auto& path : policy.allow_cgroup_paths) {
+                if (path == event.cgroup_path) {
+                    allow_match = true;
+                    break;
+                }
+            }
+        }
+
+        if (event.has_ino && event.has_dev && event.dev <= UINT32_MAX) {
+            InodeId id{event.ino, static_cast<uint32_t>(event.dev), 0};
+            for (const auto& deny : policy.deny_inodes) {
+                if (deny == id) {
+                    deny_inode_match = true;
+                    break;
+                }
+            }
+        }
+
+        if (!event.path.empty()) {
+            for (const auto& deny : policy.deny_paths) {
+                if (deny == event.path) {
+                    deny_path_match = true;
+                    break;
+                }
+            }
+        }
+        if (!deny_path_match && !event.resolved_path.empty()) {
+            for (const auto& deny : policy.deny_paths) {
+                if (deny == event.resolved_path) {
+                    deny_path_match = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    std::string inferred_rule;
+    if (!policy_loaded) {
+        inferred_rule = "unknown";
+    }
+    else if (allow_match) {
+        inferred_rule = "allow_cgroup";
+    }
+    else if (deny_inode_match) {
+        inferred_rule = "deny_inode";
+    }
+    else if (deny_path_match) {
+        inferred_rule = "deny_path";
+    }
+    else {
+        inferred_rule = "no_policy_match";
+    }
+
+    std::vector<std::string> notes;
+    notes.emplace_back("Best-effort: evaluation uses provided policy and event fields.");
+    notes.emplace_back("Inode-first enforcement: inode deny decisions override path matches.");
+    if (!policy_loaded) {
+        notes.emplace_back("No policy loaded; provide --policy or ensure an applied policy is present.");
+    }
+    if (!event.has_ino || !event.has_dev) {
+        notes.emplace_back("Event missing inode/dev; inode match not evaluated.");
+    }
+    if (allow_match && !event.action.empty() && event.action != "AUDIT") {
+        notes.emplace_back("Allowlist matched but event was blocked; policy may have changed.");
+    }
+
+    if (json_output) {
+        std::ostringstream out;
+        out << "{"
+            << "\"type\":\"" << json_escape(event.type) << "\"";
+        if (!event.action.empty()) {
+            out << ",\"action\":\"" << json_escape(event.action) << "\"";
+        }
+        if (!event.path.empty()) {
+            out << ",\"path\":\"" << json_escape(event.path) << "\"";
+        }
+        if (!event.resolved_path.empty()) {
+            out << ",\"resolved_path\":\"" << json_escape(event.resolved_path) << "\"";
+        }
+        if (event.has_ino) {
+            out << ",\"ino\":" << event.ino;
+        }
+        if (event.has_dev) {
+            out << ",\"dev\":" << event.dev;
+        }
+        if (!event.cgroup_path.empty()) {
+            out << ",\"cgroup_path\":\"" << json_escape(event.cgroup_path) << "\"";
+        }
+        if (event.has_cgid) {
+            out << ",\"cgid\":" << event.cgid;
+        }
+        out << ",\"policy\":{\"path\":\"" << json_escape(policy_source) << "\",\"loaded\":"
+            << (policy_loaded ? "true" : "false") << "}";
+        out << ",\"matches\":{"
+            << "\"allow_cgroup\":" << (policy_loaded ? (allow_match ? "true" : "false") : "false")
+            << ",\"deny_inode\":" << (policy_loaded ? (deny_inode_match ? "true" : "false") : "false")
+            << ",\"deny_path\":" << (policy_loaded ? (deny_path_match ? "true" : "false") : "false")
+            << "}";
+        out << ",\"inferred_rule\":\"" << json_escape(inferred_rule) << "\"";
+        out << ",\"notes\":[";
+        for (size_t i = 0; i < notes.size(); ++i) {
+            if (i > 0) {
+                out << ",";
+            }
+            out << "\"" << json_escape(notes[i]) << "\"";
+        }
+        out << "]}";
+        std::cout << out.str() << std::endl;
+        return 0;
+    }
+
+    std::cout << "Explain (best-effort)" << std::endl;
+    std::cout << "  type: " << event.type << std::endl;
+    if (!event.action.empty()) {
+        std::cout << "  action: " << event.action << std::endl;
+    }
+    if (!event.path.empty()) {
+        std::cout << "  path: " << event.path << std::endl;
+    }
+    if (!event.resolved_path.empty()) {
+        std::cout << "  resolved_path: " << event.resolved_path << std::endl;
+    }
+    if (event.has_ino) {
+        std::cout << "  ino: " << event.ino << std::endl;
+    }
+    if (event.has_dev) {
+        std::cout << "  dev: " << event.dev << std::endl;
+    }
+    if (!event.cgroup_path.empty()) {
+        std::cout << "  cgroup_path: " << event.cgroup_path << std::endl;
+    }
+    if (event.has_cgid) {
+        std::cout << "  cgid: " << event.cgid << std::endl;
+    }
+    std::cout << "  policy: " << (policy_loaded ? policy_source : "not loaded") << std::endl;
+    if (policy_loaded) {
+        std::cout << "  allow_cgroup_match: " << (allow_match ? "yes" : "no") << std::endl;
+        std::cout << "  deny_inode_match: " << (deny_inode_match ? "yes" : "no") << std::endl;
+        std::cout << "  deny_path_match: " << (deny_path_match ? "yes" : "no") << std::endl;
+    }
+    else {
+        std::cout << "  allow_cgroup_match: unknown" << std::endl;
+        std::cout << "  deny_inode_match: unknown" << std::endl;
+        std::cout << "  deny_path_match: unknown" << std::endl;
+    }
+    std::cout << "  inferred_rule: " << inferred_rule << std::endl;
+    if (!notes.empty()) {
+        std::cout << "  notes:" << std::endl;
+        for (const auto& note : notes) {
+            std::cout << "    - " << note << std::endl;
+        }
+    }
     return 0;
 }
 

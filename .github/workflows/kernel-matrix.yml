@@ -63,8 +63,15 @@ jobs:
           sudo chown "$USER:$USER" ./e2e-matrix-summary-${{ matrix.kernel }}.json
           python3 scripts/validate_e2e_matrix_summary.py \
             ./e2e-matrix-summary-${{ matrix.kernel }}.json \
-            --min-total-checks 60 \
+            --min-total-checks 100 \
             --max-failed-checks 0
+
+      - name: Reference enforcement slice
+        run: |
+          sudo env PRESERVE_TMP_ON_FAIL=1 SUMMARY_OUT=/tmp/reference-slice-summary.json \
+            ./scripts/reference_enforcement_slice.sh
+          sudo cp /tmp/reference-slice-summary.json ./reference-slice-summary-${{ matrix.kernel }}.json
+          sudo chown "$USER:$USER" ./reference-slice-summary-${{ matrix.kernel }}.json
 
       - name: Collect kernel-matrix metadata
         if: always()
@@ -128,6 +135,7 @@ jobs:
           name: kernel-matrix-artifacts-${{ matrix.distro_family }}-${{ matrix.kernel }}
           path: |
             e2e-matrix-summary-${{ matrix.kernel }}.json
+            reference-slice-summary-${{ matrix.kernel }}.json
             compatibility-evidence-${{ matrix.kernel }}.md
             kernel-info-${{ matrix.kernel }}.txt
             fs-type-${{ matrix.kernel }}.txt
@@ -183,8 +191,15 @@ jobs:
           sudo chown "$USER:$USER" ./e2e-matrix-summary-${{ matrix.kernel }}.json
           python3 scripts/validate_e2e_matrix_summary.py \
             ./e2e-matrix-summary-${{ matrix.kernel }}.json \
-            --min-total-checks 60 \
+            --min-total-checks 100 \
             --max-failed-checks 0
+
+      - name: Reference enforcement slice
+        run: |
+          sudo env PRESERVE_TMP_ON_FAIL=1 SUMMARY_OUT=/tmp/reference-slice-summary.json \
+            ./scripts/reference_enforcement_slice.sh
+          sudo cp /tmp/reference-slice-summary.json ./reference-slice-summary-${{ matrix.kernel }}.json
+          sudo chown "$USER:$USER" ./reference-slice-summary-${{ matrix.kernel }}.json
 
       - name: Collect kernel-matrix metadata
         if: always()
@@ -248,6 +263,7 @@ jobs:
           name: kernel-matrix-artifacts-${{ matrix.distro_family }}-${{ matrix.kernel }}
           path: |
             e2e-matrix-summary-${{ matrix.kernel }}.json
+            reference-slice-summary-${{ matrix.kernel }}.json
             compatibility-evidence-${{ matrix.kernel }}.md
             kernel-info-${{ matrix.kernel }}.txt
             fs-type-${{ matrix.kernel }}.txt

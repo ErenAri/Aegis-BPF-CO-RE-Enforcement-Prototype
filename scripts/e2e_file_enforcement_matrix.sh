@@ -151,7 +151,8 @@ run_signal_suite() {
     mkdir -p "${scenario_dir}"
     mkdir -p "${scenario_dir}/subdir"
     mkdir -p "${scenario_dir}/hardlinks"
-    printf 'signal=%s\n' "${signal}" >"${target}"
+    printf '#!/bin/sh\necho signal=%s\n' "${signal}" >"${target}"
+    chmod +x "${target}"
     printf 'benign=%s\n' "${signal}" >"${benign_target}"
     ln -sf "${target}" "${symlink_path}"
     ln "${target}" "${hardlink_path}"
@@ -169,18 +170,30 @@ run_signal_suite() {
         exit 1
     fi
 
-    # 10 blocked-open assertions per signal mode.
+    # Blocked-open assertions per signal mode.
     run_expect_blocked "${signal}: cat direct" cat "${target}"
     run_expect_blocked "${signal}: head direct" head -c 1 "${target}"
     run_expect_blocked "${signal}: tail direct" tail -c 1 "${target}"
     run_expect_blocked "${signal}: dd direct" dd if="${target}" of=/dev/null bs=1 count=1 status=none
+    run_expect_blocked "${signal}: dd direct 4k" dd if="${target}" of=/dev/null bs=4k count=1 status=none
     run_expect_blocked "${signal}: grep direct" grep -m1 . "${target}"
+    run_expect_blocked "${signal}: awk direct" awk 'NR==1{print; exit}' "${target}"
+    run_expect_blocked "${signal}: sed direct" sed -n '1p' "${target}"
+    run_expect_blocked "${signal}: od direct" od -An -N1 "${target}" >/dev/null
+    run_expect_blocked "${signal}: wc direct" wc -c "${target}" >/dev/null
+    run_expect_blocked "${signal}: bash read" bash -c "while IFS= read -r line; do break; done <\"${target}\""
+    run_expect_blocked "${signal}: cp direct" cp "${target}" "${scenario_dir}/copy.txt"
+    run_expect_blocked "${signal}: xargs cat" bash -c "printf '%s\\0' \"${target}\" | xargs -0 cat"
     run_expect_blocked "${signal}: python direct" python3 -c "import pathlib,sys; pathlib.Path(sys.argv[1]).read_bytes()" "${target}"
     run_expect_blocked "${signal}: cat symlink" cat "${symlink_path}"
     run_expect_blocked "${signal}: head symlink" head -c 1 "${symlink_path}"
     run_expect_blocked "${signal}: cat hardlink" cat "${hardlink_path}"
     run_expect_blocked "${signal}: dd hardlink" dd if="${hardlink_path}" of=/dev/null bs=1 count=1 status=none
     run_expect_blocked "${signal}: cat cross-dir hardlink" cat "${cross_hardlink_path}"
+    run_expect_blocked "${signal}: exec direct" "${target}"
+    run_expect_blocked "${signal}: exec symlink" "${symlink_path}"
+    run_expect_blocked "${signal}: exec hardlink" "${hardlink_path}"
+    run_expect_blocked "${signal}: exec cross-dir hardlink" "${cross_hardlink_path}"
     run_expect_success "${signal}: cat benign symlink before swap" cat "${swap_symlink_path}"
     ln -sf "${target}" "${swap_symlink_path}"
     run_expect_blocked "${signal}: cat symlink after swap" cat "${swap_symlink_path}"
@@ -216,6 +229,68 @@ run_signal_suite() {
         skip "${signal}: bind mount alias checks" "mount --bind unavailable in this environment"
         skip "${signal}: bind mount alias checks" "mount --bind unavailable in this environment"
         skip "${signal}: bind mount alias checks" "mount --bind unavailable in this environment"
+    fi
+
+    # OverlayFS alias checks (optional, may be unavailable).
+    local overlay_root="${scenario_dir}/overlay"
+    local overlay_lower="${overlay_root}/lower"
+    local overlay_upper="${overlay_root}/upper"
+    local overlay_work="${overlay_root}/work"
+    local overlay_merged="${overlay_root}/merged"
+    local overlay_target="${overlay_lower}/overlay_target.sh"
+    mkdir -p "${overlay_lower}" "${overlay_upper}" "${overlay_work}" "${overlay_merged}"
+    printf '#!/bin/sh\necho overlay=%s\n' "${signal}" >"${overlay_target}"
+    chmod +x "${overlay_target}"
+    local overlay_inode
+    overlay_inode="$(stat -c %i "${overlay_target}")"
+    if ! "${BIN}" block add "${overlay_target}" >/dev/null 2>&1; then
+        echo "Failed to add block rule for overlay target ${overlay_target}" >&2
+        exit 1
+    fi
+    local overlay_mounted=0
+    if mount -t overlay overlay -o "lowerdir=${overlay_lower},upperdir=${overlay_upper},workdir=${overlay_work}" "${overlay_merged}" >/dev/null 2>&1; then
+        overlay_mounted=1
+        local merged_target="${overlay_merged}/overlay_target.sh"
+        if [[ ! -f "${merged_target}" ]]; then
+            fail "${signal}: overlay merged path" "missing ${merged_target}"
+        else
+            local merged_inode
+            merged_inode="$(stat -c %i "${merged_target}")"
+            if [[ "${merged_inode}" == "${overlay_inode}" ]]; then
+                run_expect_blocked "${signal}: overlay cat" cat "${merged_target}"
+                run_expect_blocked "${signal}: overlay exec" "${merged_target}"
+            else
+                skip "${signal}: overlay cat" "overlay inode differs (documented caveat)"
+                skip "${signal}: overlay exec" "overlay inode differs (documented caveat)"
+            fi
+        fi
+    else
+        skip "${signal}: overlay cat" "overlayfs mount unavailable in this environment"
+        skip "${signal}: overlay exec" "overlayfs mount unavailable in this environment"
+    fi
+
+    if [[ "${overlay_mounted}" -eq 1 ]]; then
+        if ! umount "${overlay_merged}" >/dev/null 2>&1; then
+            fail "${signal}: overlay umount" "failed to unmount ${overlay_merged}"
+        fi
+    fi
+    "${BIN}" block del "${overlay_target}" >/dev/null 2>&1 || true
+
+    # Mount-namespace checks (optional).
+    local ns_bind_path="${scenario_dir}/ns_bind"
+    touch "${ns_bind_path}"
+    if command -v unshare >/dev/null 2>&1; then
+        if unshare -m --propagation private true >/dev/null 2>&1; then
+            run_expect_blocked "${signal}: unshare cat direct" unshare -m --propagation private cat "${target}"
+            run_expect_blocked "${signal}: unshare bind cat" unshare -m --propagation private bash -c \
+                "mount --bind \"${target}\" \"${ns_bind_path}\" && cat \"${ns_bind_path}\""
+        else
+            skip "${signal}: unshare cat direct" "unshare -m not permitted in this environment"
+            skip "${signal}: unshare bind cat" "unshare -m not permitted in this environment"
+        fi
+    else
+        skip "${signal}: unshare cat direct" "unshare not available in this environment"
+        skip "${signal}: unshare bind cat" "unshare not available in this environment"
     fi
 
     sleep 1
