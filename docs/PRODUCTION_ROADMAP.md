@@ -45,6 +45,7 @@ These items are planned only after v1 gates are met.
 
 **Gate A3:** Suite passes in CI with 0 failed checks.
 **Gate A3:** Scenario count >= 60.
+**Gate A3:** `docs/EDGE_CASE_COMPLIANCE_SUITE.md` published.
 
 ### A4. Verifier / CO-RE Robustness
 - Verifier budget regression tests
