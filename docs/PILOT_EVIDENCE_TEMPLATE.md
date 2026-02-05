@@ -43,6 +43,12 @@ Super-Phase B and Super-Phase C.
 - Policy authoring pain points:
 - Explainability quality (`why denied`) score:
 
+## Differentiation KPIs (adoption drivers)
+
+- Time-to-correct-policy (median minutes):
+- Time-to-diagnose-deny (median minutes):
+- Operator cognitive load (steps to resolve incident):
+
 ## Evidence links
 
 - CI/workflow runs:

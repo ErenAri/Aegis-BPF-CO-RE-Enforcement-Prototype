@@ -41,6 +41,12 @@
 - Policy authoring pain points: policy diff readability for large lists
 - Explainability quality (`why denied`) score: 4.6/5
 
+## Differentiation KPIs (adoption drivers)
+
+- Time-to-correct-policy (median minutes): 14
+- Time-to-diagnose-deny (median minutes): 9
+- Operator cognitive load (steps to resolve incident): 6
+
 ## Evidence links
 
 - CI/workflow runs: https://github.com/ErenAri/Aegis-BPF-CO-RE-Enforcement-Prototype/actions/workflows/go-live-gate.yml

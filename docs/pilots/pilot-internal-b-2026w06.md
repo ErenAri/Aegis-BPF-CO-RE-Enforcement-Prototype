@@ -41,6 +41,12 @@
 - Policy authoring pain points: cgroup selection ergonomics
 - Explainability quality (`why denied`) score: 4.4/5
 
+## Differentiation KPIs (adoption drivers)
+
+- Time-to-correct-policy (median minutes): 19
+- Time-to-diagnose-deny (median minutes): 11
+- Operator cognitive load (steps to resolve incident): 7
+
 ## Evidence links
 
 - CI/workflow runs: https://github.com/ErenAri/Aegis-BPF-CO-RE-Enforcement-Prototype/actions/workflows/kernel-matrix.yml

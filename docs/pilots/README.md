@@ -14,4 +14,6 @@ Rules:
   - unexplained event drop ratio
   - silent partial attach incidents
   - syscall p95 delta
+  - time-to-correct-policy
+  - time-to-diagnose-deny
   - evidence links
