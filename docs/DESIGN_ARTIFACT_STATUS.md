@@ -13,7 +13,7 @@ This page tracks synchronization status between active markdown specs in
 ## Root PDF status
 
 - Artifact: `eBPF Runtime Security Agent Design.pdf`
-- Status on 2026-02-05: **Needs refresh from current docs**
+- Status on 2026-02-05: **Needs refresh from current docs** (generation blocked: pandoc not installed)
 - Blocking delta areas:
   - Market-leadership super-phase gates
   - Updated soak/perf KPI enforcement (`<0.1%` drop ratio, `p95 <= 5%`)
