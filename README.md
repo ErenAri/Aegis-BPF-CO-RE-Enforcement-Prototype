@@ -73,6 +73,9 @@ Public proof lives in the docs and CI artifacts:
 - Policy semantics contract: `docs/POLICY_SEMANTICS.md`
 - Enforcement semantics whitepaper: `docs/ENFORCEMENT_SEMANTICS_WHITEPAPER.md`
 - Edge-case compliance suite: `docs/EDGE_CASE_COMPLIANCE_SUITE.md`
+- External validation status: `docs/EXTERNAL_VALIDATION.md`
+- Enforcement semantics whitepaper: `docs/ENFORCEMENT_SEMANTICS_WHITEPAPER.md`
+- Edge-case compliance suite: `docs/EDGE_CASE_COMPLIANCE_SUITE.md`
 
 Kernel-matrix artifacts are uploaded by `.github/workflows/kernel-matrix.yml`
 as `kernel-matrix-<runner>` (kernel + distro + test logs).
