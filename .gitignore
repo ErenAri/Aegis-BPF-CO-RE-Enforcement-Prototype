@@ -18,9 +18,14 @@ coverage*.html
 coverage.xml
 coverage.css
 coverage.js
-__pycache__/
+
+# local tooling / caches
 .tools/
-docs/_internal/
 __pycache__/
-.tools/
+**/__pycache__/
+.pytest_cache/
+.cache/
+
+# local clones / scratch dirs
+Aegis-BPF-CO-RE-Enforcement-Prototype/
 docs/_internal/

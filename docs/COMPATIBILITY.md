@@ -34,8 +34,7 @@ AegisBPF operates in one of three capability levels based on kernel support:
 
 **Capabilities:**
 - Block file access (returns `EPERM`)
-- Optional enforce signal (`SIGTERM` by default; `SIGKILL` requires build-time
-  `-DENABLE_SIGKILL_ENFORCEMENT=ON` and runtime `--allow-sigkill`)
+- Optional enforce signal (`SIGTERM` by default, configurable to `SIGKILL`, `SIGINT`, or none)
 - Inode-based tracking
 - Full audit logging
 
@@ -67,7 +66,7 @@ AegisBPF cannot run if:
 
 | Distribution | Version | Kernel | LSM Enforce | Audit-Only | Notes |
 |-------------|---------|--------|-------------|------------|-------|
-| Ubuntu | 22.04 LTS | 5.15+ (CI: 6.8 HWE) | Yes* | Yes | Add `lsm=bpf` to boot params |
+| Ubuntu | 22.04 LTS | 6.8 (HWE in CI) | Yes* | Yes | Add `lsm=bpf` to boot params |
 | Ubuntu | 24.04 LTS | 6.5+ | Yes* | Yes | Add `lsm=bpf` to boot params |
 | Debian | 12 (Bookworm) | 6.1+ | Yes* | Yes | Add `lsm=bpf` to boot params |
 | RHEL | 9.x | 5.14+ | Yes* | Yes | Add `lsm=bpf` to boot params |
@@ -76,30 +75,6 @@ AegisBPF cannot run if:
 | Amazon Linux | 2023 | 6.1+ | Yes* | Yes | Add `lsm=bpf` to boot params |
 
 \* Requires adding `lsm=bpf` or `lsm=landlock,lockdown,yama,bpf` to kernel boot parameters.
-
-Compatibility CI evidence and kernel/distro matrix source of truth are tracked
-in the CI kernel-matrix artifacts.
-
-## CI-Backed Evidence Matrix
-
-The portability table is backed by workflow and artifact evidence, not manual
-assertions.
-
-| Evidence dimension | Source | Artifact marker |
-|---|---|---|
-| Kernel matrix target set | `.github/workflows/kernel-matrix.yml` | `kernel-matrix-artifacts-<distro>-<kernel>/...` |
-| Enforcement checks per target | `scripts/e2e_file_enforcement_matrix.sh` | `e2e-matrix-summary-<kernel>.json` |
-| Runner OS/distro metadata | kernel/e2e workflows | `os-release-<kernel>.txt` / `os-release.txt` |
-| Filesystem metadata | kernel/e2e workflows | `fs-type-<kernel>.txt` / `fs-type.txt` |
-| Human-readable run summary | kernel/e2e workflows | `compatibility-evidence-<kernel>.md` / `compatibility-evidence-e2e.md` |
-
-Review procedure:
-1. Open the latest kernel-matrix workflow run.
-2. Download `kernel-matrix-artifacts-*` bundles.
-3. Confirm `failed_checks == 0` in each summary JSON and inspect
-   `skipped_checks`.
-4. Correlate distro/kernel/filesystem fields with the compatibility claim under
-   review.
 
 ## Distribution and Runtime Quirks
 
