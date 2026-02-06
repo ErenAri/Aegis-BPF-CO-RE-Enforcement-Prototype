@@ -3,6 +3,7 @@ name: Kernel Matrix
 
 on:
   workflow_dispatch:
+  workflow_call:
   schedule:
     - cron: "0 5 * * 0"
 

@@ -1,0 +1,9 @@
+name: Kernel Matrix (dispatch)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  kernel-matrix:
+    uses: ./.github/workflows/kernel-matrix.yml
+    secrets: inherit
