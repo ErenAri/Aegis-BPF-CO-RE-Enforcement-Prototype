@@ -9,8 +9,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [kernel-6.8, kernel-6.1, kernel-6.5, kernel-5.14]
-    runs-on: [self-hosted, ${{ matrix.runner }}]
+        runner:
+          - '["self-hosted","kernel-6.8"]'
+          - '["self-hosted","kernel-6.1"]'
+          - '["self-hosted","kernel-6.5"]'
+          - '["self-hosted","kernel-5.14"]'
+    runs-on: ${{ fromJSON(matrix.runner) }}
     steps:
       - uses: actions/checkout@v4
 
