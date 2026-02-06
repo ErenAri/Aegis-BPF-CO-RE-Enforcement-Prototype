@@ -63,6 +63,18 @@ Current scope labels:
 - `AUDITED`: tracepoint fallback path (no syscall deny), detailed metrics mode
 - `PLANNED`: broader runtime surfaces beyond current documented hooks
 
+## Evidence & CI
+
+Public proof lives in the docs and CI artifacts:
+- Evidence checklist and gates: `docs/PRODUCTION_READINESS.md`
+- Kernel/CI execution model: `docs/CI_EXECUTION_STRATEGY.md`
+- Kernel/distro compatibility: `docs/COMPATIBILITY.md`
+- Threat model + non-goals: `docs/THREAT_MODEL.md`
+- Policy semantics contract: `docs/POLICY_SEMANTICS.md`
+
+Kernel-matrix artifacts are uploaded by `.github/workflows/kernel-matrix.yml`
+as `kernel-matrix-<runner>` (kernel + distro + test logs).
+
 ## Architecture
 
 ```

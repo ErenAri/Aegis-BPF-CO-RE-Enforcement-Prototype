@@ -91,3 +91,12 @@ For public CI evidence, see `docs/EVIDENCE.md`.
 - CI kernel-e2e execution strategy: `docs/CI_EXECUTION_STRATEGY.md`
 - Branch-protection baseline: `docs/BRANCH_PROTECTION.md` + `scripts/check_branch_protection.sh`
 - Branch-protection audit workflow: `.github/workflows/branch-protection-audit.yml`
+
+## Evidence artifacts
+
+The canonical evidence artifacts live in GitHub Actions runs:
+- Kernel matrix artifacts: `kernel-matrix-<runner>` (kernel/distro metadata + logs)
+- CI artifacts: build/test logs + benchmark JSON
+- Release readiness: `release_readiness.sh` logs and scorecards
+
+Update this checklist with run URLs when validating a release.
