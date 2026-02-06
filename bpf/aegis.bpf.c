@@ -485,18 +485,12 @@ static __always_inline void maybe_send_enforce_signal(__u8 signal)
         bpf_send_signal(signal);
 }
 
-static __always_inline int audit_or_deny(__u8 audit)
-{
-    if (audit)
-        return 0;
-    return -EPERM;
-}
-
 static __always_inline int enforcement_result(void)
 {
     __u8 audit = get_effective_audit_mode();
-    audit &= 1;
-    return audit_or_deny(audit);
+    if (audit)
+        return 0;
+    return -EPERM;
 }
 
 static __always_inline __u32 get_sigkill_escalation_threshold(void)
@@ -823,8 +817,11 @@ int BPF_PROG(handle_file_open, struct file *file)
         maybe_send_enforce_signal(enforce_signal);
 
     /* Send block event */
-    if (!should_emit_event(sample_rate))
-        return audit_or_deny(audit);
+    if (!should_emit_event(sample_rate)) {
+        if (audit)
+            return 0;
+        return -EPERM;
+    }
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (e) {
         e->type = EVENT_BLOCK;
@@ -840,7 +837,9 @@ int BPF_PROG(handle_file_open, struct file *file)
         increment_ringbuf_drops();
     }
 
-    return audit_or_deny(audit);
+    if (audit)
+        return 0;
+    return -EPERM;
 }
 
 static __always_inline int handle_inode_permission_impl(struct inode *inode, int mask)
@@ -893,8 +892,11 @@ static __always_inline int handle_inode_permission_impl(struct inode *inode, int
         maybe_send_enforce_signal(enforce_signal);
 
     /* Send block event */
-    if (!should_emit_event(sample_rate))
-        return audit_or_deny(audit);
+    if (!should_emit_event(sample_rate)) {
+        if (audit)
+            return 0;
+        return -EPERM;
+    }
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (e) {
         e->type = EVENT_BLOCK;
@@ -910,7 +912,9 @@ static __always_inline int handle_inode_permission_impl(struct inode *inode, int
         increment_ringbuf_drops();
     }
 
-    return audit_or_deny(audit);
+    if (audit)
+        return 0;
+    return -EPERM;
 }
 
 SEC("lsm/inode_permission")
@@ -1129,8 +1133,11 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
         maybe_send_enforce_signal(enforce_signal);
 
     /* Emit event */
-    if (!should_emit_event(sample_rate))
-        return audit_or_deny(audit);
+    if (!should_emit_event(sample_rate)) {
+        if (audit)
+            return 0;
+        return -EPERM;
+    }
 
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (e) {
@@ -1155,7 +1162,9 @@ int BPF_PROG(handle_socket_connect, struct socket *sock,
         increment_net_ringbuf_drops();
     }
 
-    return audit_or_deny(audit);
+    if (audit)
+        return 0;
+    return -EPERM;
 }
 
 SEC("lsm/socket_bind")
@@ -1230,8 +1239,11 @@ int BPF_PROG(handle_socket_bind, struct socket *sock,
         maybe_send_enforce_signal(enforce_signal);
 
     /* Emit event */
-    if (!should_emit_event(sample_rate))
-        return audit_or_deny(audit);
+    if (!should_emit_event(sample_rate)) {
+        if (audit)
+            return 0;
+        return -EPERM;
+    }
 
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (e) {
@@ -1253,7 +1265,9 @@ int BPF_PROG(handle_socket_bind, struct socket *sock,
         increment_net_ringbuf_drops();
     }
 
-    return audit_or_deny(audit);
+    if (audit)
+        return 0;
+    return -EPERM;
 }
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
