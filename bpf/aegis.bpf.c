@@ -791,27 +791,50 @@ int BPF_PROG(handle_file_open, struct file *file)
         return 0;
 
     __u8 audit = get_effective_audit_mode();
-    if (audit)
-        audit = 1;
-    else
-        audit = 0;
+    if (audit) {
+        __u32 pid = bpf_get_current_pid_tgid() >> 32;
+        __u8 enforce_signal = 0;
+        struct task_struct *task = bpf_get_current_task_btf();
+        __u32 sample_rate = get_event_sample_rate();
+
+        /* Update statistics */
+        increment_block_stats();
+        increment_cgroup_stat(cgid);
+        increment_inode_stat(&key);
+
+        /* Send block event */
+        if (!should_emit_event(sample_rate))
+            return 0;
+        struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+        if (e) {
+            e->type = EVENT_BLOCK;
+            fill_block_event_process_info(&e->block, pid, task);
+            e->block.cgid = cgid;
+            bpf_get_current_comm(e->block.comm, sizeof(e->block.comm));
+            e->block.ino = key.ino;
+            e->block.dev = key.dev;
+            __builtin_memset(e->block.path, 0, sizeof(e->block.path));
+            set_action_string(e->block.action, 1, enforce_signal);
+            bpf_ringbuf_submit(e, 0);
+        } else {
+            increment_ringbuf_drops();
+        }
+
+        return 0;
+    }
+
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     __u8 enforce_signal = 0;
-    if (!audit) {
-        __u8 configured_signal = get_effective_enforce_signal();
-        if (configured_signal == SIGKILL) {
-            __u32 kill_threshold = get_sigkill_escalation_threshold();
-            __u64 kill_window_ns = get_sigkill_escalation_window_ns();
-            enforce_signal = runtime_enforce_signal(configured_signal, pid, kill_threshold, kill_window_ns);
-        } else {
-            enforce_signal = configured_signal;
-        }
+    __u8 configured_signal = get_effective_enforce_signal();
+    if (configured_signal == SIGKILL) {
+        __u32 kill_threshold = get_sigkill_escalation_threshold();
+        __u64 kill_window_ns = get_sigkill_escalation_window_ns();
+        enforce_signal = runtime_enforce_signal(configured_signal, pid, kill_threshold, kill_window_ns);
+    } else {
+        enforce_signal = configured_signal;
     }
     struct task_struct *task = bpf_get_current_task_btf();
     __u32 sample_rate = get_event_sample_rate();
-    volatile int verdict = 0;
-    if (!audit)
-        verdict = -EPERM;
 
     /* Update statistics */
     increment_block_stats();
@@ -819,12 +842,11 @@ int BPF_PROG(handle_file_open, struct file *file)
     increment_inode_stat(&key);
 
     /* Optional signal in enforce mode (always deny with -EPERM). */
-    if (!audit)
-        maybe_send_enforce_signal(enforce_signal);
+    maybe_send_enforce_signal(enforce_signal);
 
     /* Send block event */
     if (!should_emit_event(sample_rate))
-        return verdict;
+        return -EPERM;
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (e) {
         e->type = EVENT_BLOCK;
@@ -834,13 +856,13 @@ int BPF_PROG(handle_file_open, struct file *file)
         e->block.ino = key.ino;
         e->block.dev = key.dev;
         __builtin_memset(e->block.path, 0, sizeof(e->block.path));
-        set_action_string(e->block.action, audit, enforce_signal);
+        set_action_string(e->block.action, 0, enforce_signal);
         bpf_ringbuf_submit(e, 0);
     } else {
         increment_ringbuf_drops();
     }
 
-    return verdict;
+    return -EPERM;
 }
 
 static __always_inline int handle_inode_permission_impl(struct inode *inode, int mask)
