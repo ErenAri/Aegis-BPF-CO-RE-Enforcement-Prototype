@@ -1,0 +1,11 @@
+name: Kernel Matrix (dispatch)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 0"
+
+jobs:
+  kernel-matrix:
+    uses: ./.github/workflows/kernel-matrix.yml
+    secrets: inherit
