@@ -14,8 +14,26 @@ jobs:
       - name: Install dependencies (if apt-get is available)
         run: |
           if command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y clang llvm bpftool libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema
+            export DEBIAN_FRONTEND=noninteractive
+            for attempt in 1 2 3; do
+              if sudo apt-get -o DPkg::Lock::Timeout=120 update && \
+                 sudo apt-get -o DPkg::Lock::Timeout=120 install -y \
+                   clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema; then
+                break
+              fi
+              echo "apt-get attempt ${attempt} failed; retrying in 10s..."
+              sleep 10
+            done
+            if ! command -v bpftool >/dev/null 2>&1; then
+              sudo apt-get -o DPkg::Lock::Timeout=120 install -y linux-tools-common || true
+              sudo apt-get -o DPkg::Lock::Timeout=120 install -y "linux-tools-$(uname -r)" || \
+                sudo apt-get -o DPkg::Lock::Timeout=120 install -y linux-tools-gcp || \
+                sudo apt-get -o DPkg::Lock::Timeout=120 install -y linux-tools-generic || true
+            fi
+            if ! command -v bpftool >/dev/null 2>&1; then
+              echo "bpftool is required but was not installed" >&2
+              exit 1
+            fi
           fi
 
       - name: Verify environment
@@ -81,6 +99,7 @@ jobs:
       - name: Capture E2E environment
         if: always()
         run: |
+          mkdir -p artifacts/e2e
           uname -a > artifacts/e2e/kernel.txt
           cat /etc/os-release > artifacts/e2e/os-release.txt || true
           lscpu > artifacts/e2e/cpu.txt || true
