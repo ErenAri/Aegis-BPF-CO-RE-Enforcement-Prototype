@@ -101,8 +101,7 @@ inline std::string error_message(AegisErrorCode code, bool verbose = false)
             return verbose ? "Failed to load BPF program. Check kernel logs for verifier errors."
                            : "Failed to load security enforcement. Check system logs.";
         case AegisErrorCode::BpfAttachFailed:
-            return verbose ? "Failed to attach BPF program to LSM hooks"
-                           : "Failed to activate security enforcement.";
+            return verbose ? "Failed to attach BPF program to LSM hooks" : "Failed to activate security enforcement.";
         case AegisErrorCode::BpfMapFull:
             return "BPF map capacity reached. Remove unused deny rules or increase map size.";
         case AegisErrorCode::BpfMapNotFound:
