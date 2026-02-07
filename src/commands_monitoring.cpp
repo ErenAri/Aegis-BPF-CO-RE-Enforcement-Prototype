@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <utility>
@@ -30,6 +31,16 @@
 namespace aegis {
 
 namespace {
+
+// BPF map capacity constants (must match bpf/aegis.bpf.c)
+constexpr uint64_t MAX_DENY_INODE_ENTRIES = 65536;
+constexpr uint64_t MAX_DENY_PATH_ENTRIES = 16384;
+constexpr uint64_t MAX_ALLOW_CGROUP_ENTRIES = 1024;
+constexpr uint64_t MAX_DENY_IPV4_ENTRIES = 65536;
+constexpr uint64_t MAX_DENY_IPV6_ENTRIES = 65536;
+constexpr uint64_t MAX_DENY_PORT_ENTRIES = 4096;
+constexpr uint64_t MAX_DENY_CIDR_V4_ENTRIES = 16384;
+constexpr uint64_t MAX_DENY_CIDR_V6_ENTRIES = 16384;
 
 int fail_span(ScopedSpan& span, const std::string& message)
 {
@@ -66,9 +77,35 @@ void append_metric_sample(std::ostringstream& oss, const std::string& name,
     oss << " " << value << "\n";
 }
 
+void append_metric_sample(std::ostringstream& oss, const std::string& name,
+                          const std::vector<std::pair<std::string, std::string>>& labels, double value)
+{
+    oss << name;
+    if (!labels.empty()) {
+        oss << "{";
+        for (size_t i = 0; i < labels.size(); ++i) {
+            if (i > 0) {
+                oss << ",";
+            }
+            oss << labels[i].first << "=\"" << prometheus_escape_label(labels[i].second) << "\"";
+        }
+        oss << "}";
+    }
+    oss << " " << std::fixed << std::setprecision(6) << value << "\n";
+}
+
 size_t safe_map_entry_count(bpf_map* map)
 {
     return map ? map_entry_count(map) : 0;
+}
+
+double calculate_map_utilization(bpf_map* map, uint64_t max_entries)
+{
+    if (!map || max_entries == 0) {
+        return 0.0;
+    }
+    uint64_t current = map_entry_count(map);
+    return static_cast<double>(current) / static_cast<double>(max_entries);
 }
 
 Result<void> verify_pinned_map_access(const char* pin_path)
@@ -489,6 +526,49 @@ int cmd_metrics(const std::string& out_path, bool detailed)
     append_metric_sample(oss, "aegisbpf_net_rules_total", {{"type", "ip"}}, ip_rule_count);
     append_metric_sample(oss, "aegisbpf_net_rules_total", {{"type", "cidr"}}, cidr_rule_count);
     append_metric_sample(oss, "aegisbpf_net_rules_total", {{"type", "port"}}, safe_map_entry_count(state.deny_port));
+
+    // Map utilization (entries / capacity)
+    append_metric_header(oss, "aegisbpf_map_utilization", "gauge", "BPF map utilization ratio (0.0 to 1.0)");
+    double deny_inode_util = calculate_map_utilization(state.deny_inode, MAX_DENY_INODE_ENTRIES);
+    double deny_path_util = calculate_map_utilization(state.deny_path, MAX_DENY_PATH_ENTRIES);
+    double allow_cgroup_util = calculate_map_utilization(state.allow_cgroup, MAX_ALLOW_CGROUP_ENTRIES);
+    append_metric_sample(oss, "aegisbpf_map_utilization", {{"map", "deny_inode"}}, deny_inode_util);
+    append_metric_sample(oss, "aegisbpf_map_utilization", {{"map", "deny_path"}}, deny_path_util);
+    append_metric_sample(oss, "aegisbpf_map_utilization", {{"map", "allow_cgroup"}}, allow_cgroup_util);
+
+    if (state.deny_ipv4 || state.deny_ipv6) {
+        double ipv4_util = calculate_map_utilization(state.deny_ipv4, MAX_DENY_IPV4_ENTRIES);
+        double ipv6_util = calculate_map_utilization(state.deny_ipv6, MAX_DENY_IPV6_ENTRIES);
+        append_metric_sample(oss, "aegisbpf_map_utilization", {{"map", "deny_ipv4"}}, ipv4_util);
+        append_metric_sample(oss, "aegisbpf_map_utilization", {{"map", "deny_ipv6"}}, ipv6_util);
+    }
+    if (state.deny_port) {
+        double port_util = calculate_map_utilization(state.deny_port, MAX_DENY_PORT_ENTRIES);
+        append_metric_sample(oss, "aegisbpf_map_utilization", {{"map", "deny_port"}}, port_util);
+    }
+    if (state.deny_cidr_v4 || state.deny_cidr_v6) {
+        double cidr_v4_util = calculate_map_utilization(state.deny_cidr_v4, MAX_DENY_CIDR_V4_ENTRIES);
+        double cidr_v6_util = calculate_map_utilization(state.deny_cidr_v6, MAX_DENY_CIDR_V6_ENTRIES);
+        append_metric_sample(oss, "aegisbpf_map_utilization", {{"map", "deny_cidr_v4"}}, cidr_v4_util);
+        append_metric_sample(oss, "aegisbpf_map_utilization", {{"map", "deny_cidr_v6"}}, cidr_v6_util);
+    }
+
+    // Map capacity limits
+    append_metric_header(oss, "aegisbpf_map_capacity", "gauge", "Maximum BPF map capacity");
+    append_metric_sample(oss, "aegisbpf_map_capacity", {{"map", "deny_inode"}}, MAX_DENY_INODE_ENTRIES);
+    append_metric_sample(oss, "aegisbpf_map_capacity", {{"map", "deny_path"}}, MAX_DENY_PATH_ENTRIES);
+    append_metric_sample(oss, "aegisbpf_map_capacity", {{"map", "allow_cgroup"}}, MAX_ALLOW_CGROUP_ENTRIES);
+    if (state.deny_ipv4 || state.deny_ipv6) {
+        append_metric_sample(oss, "aegisbpf_map_capacity", {{"map", "deny_ipv4"}}, MAX_DENY_IPV4_ENTRIES);
+        append_metric_sample(oss, "aegisbpf_map_capacity", {{"map", "deny_ipv6"}}, MAX_DENY_IPV6_ENTRIES);
+    }
+    if (state.deny_port) {
+        append_metric_sample(oss, "aegisbpf_map_capacity", {{"map", "deny_port"}}, MAX_DENY_PORT_ENTRIES);
+    }
+    if (state.deny_cidr_v4 || state.deny_cidr_v6) {
+        append_metric_sample(oss, "aegisbpf_map_capacity", {{"map", "deny_cidr_v4"}}, MAX_DENY_CIDR_V4_ENTRIES);
+        append_metric_sample(oss, "aegisbpf_map_capacity", {{"map", "deny_cidr_v6"}}, MAX_DENY_CIDR_V6_ENTRIES);
+    }
 
     std::string metrics = oss.str();
 
