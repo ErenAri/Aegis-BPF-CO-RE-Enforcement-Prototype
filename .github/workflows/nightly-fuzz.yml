@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev pkg-config cmake ninja-build
+          sudo apt-get install -y clang llvm libbpf-dev pkg-config cmake ninja-build libgtest-dev
 
       - name: Configure
         env:
