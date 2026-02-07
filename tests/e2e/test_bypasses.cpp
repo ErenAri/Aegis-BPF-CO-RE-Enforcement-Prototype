@@ -11,17 +11,17 @@
  */
 
 // cppcheck-suppress-file syntaxError
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 namespace aegis {
 namespace test {
@@ -45,10 +45,7 @@ class BypassTest : public ::testing::Test {
         out.close();
     }
 
-    void TearDown() override
-    {
-        std::filesystem::remove_all(kTestDir);
-    }
+    void TearDown() override { std::filesystem::remove_all(kTestDir); }
 
     bool file_is_blocked(const char* path)
     {
@@ -208,10 +205,8 @@ TEST_F(BypassTest, DirectoryTraversal)
     for (const char* path : paths) {
         struct stat st {};
         if (stat(path, &st) == 0) {
-            EXPECT_EQ(st_base.st_ino, st.st_ino)
-                << "Path: " << path << " should have same inode";
-            EXPECT_EQ(st_base.st_dev, st.st_dev)
-                << "Path: " << path << " should have same device";
+            EXPECT_EQ(st_base.st_ino, st.st_ino) << "Path: " << path << " should have same inode";
+            EXPECT_EQ(st_base.st_dev, st.st_dev) << "Path: " << path << " should have same device";
         }
     }
 }
@@ -232,8 +227,7 @@ TEST_F(BypassTest, CaseSensitivity)
     ASSERT_EQ(0, stat(kTestFile, &st_lower));
     ASSERT_EQ(0, stat(uppercase_path, &st_upper));
 
-    EXPECT_NE(st_lower.st_ino, st_upper.st_ino)
-        << "Different case should be different files on Linux";
+    EXPECT_NE(st_lower.st_ino, st_upper.st_ino) << "Different case should be different files on Linux";
 }
 
 // Test: Blocking a symlink target vs the symlink itself
@@ -249,8 +243,7 @@ TEST_F(BypassTest, SymlinkTargetVsSymlink)
     ASSERT_EQ(0, stat(symlink_path, &st_target));
 
     // These should be different inodes
-    EXPECT_NE(st_link.st_ino, st_target.st_ino)
-        << "Symlink inode should differ from target inode";
+    EXPECT_NE(st_link.st_ino, st_target.st_ino) << "Symlink inode should differ from target inode";
 
     // Verify target inode matches direct access
     struct stat st_direct {};
@@ -271,11 +264,10 @@ TEST_F(BypassTest, SurvivalBinariesExist)
     for (const char* path : survival_binaries) {
         struct stat st {};
         if (stat(path, &st) == 0) {
-            EXPECT_TRUE(can_read_file(path))
-                << "Survival binary should be readable: " << path;
+            EXPECT_TRUE(can_read_file(path)) << "Survival binary should be readable: " << path;
         }
     }
 }
 
-}  // namespace test
-}  // namespace aegis
+} // namespace test
+} // namespace aegis
