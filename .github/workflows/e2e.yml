@@ -15,7 +15,7 @@ jobs:
         run: |
           if command -v apt-get >/dev/null 2>&1; then
             export DEBIAN_FRONTEND=noninteractive
-            pkgs="clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema libelf-dev zlib1g-dev git"
+            pkgs="clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build python3-jsonschema libelf-dev zlib1g-dev git libgtest-dev"
             for attempt in 1 2 3; do
               if sudo apt-get -o DPkg::Lock::Timeout=120 update && \
                  sudo apt-get -o DPkg::Lock::Timeout=120 install -y $pkgs; then

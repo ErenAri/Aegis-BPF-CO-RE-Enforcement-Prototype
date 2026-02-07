@@ -285,14 +285,24 @@ if(BUILD_TESTING)
     enable_testing()
     include(FetchContent)
 
-    FetchContent_Declare(
-        googletest
-        URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
-        URL_HASH SHA256=8ad598c73ad796e0d8280b082cebd82a630d73e73cd3c70057938a6501bba5d7
-    )
-    # For Windows: Prevent overriding the parent project's compiler/linker settings
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(googletest)
+    # Try to use system googletest first
+    find_package(GTest QUIET)
+
+    if(NOT GTest_FOUND)
+        message(STATUS "System GTest not found, using FetchContent")
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+            URL_HASH SHA256=8ad598c73ad796e0d8280b082cebd82a630d73e73cd3c70057938a6501bba5d7
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            TIMEOUT 30
+        )
+        # For Windows: Prevent overriding the parent project's compiler/linker settings
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+    else()
+        message(STATUS "Using system GTest")
+    endif()
 
     # Test sources
     set(TEST_SOURCES
@@ -330,17 +340,27 @@ if(BUILD_TESTING)
 
     # Benchmark tests (optional, for performance regression)
     if(BUILD_BENCHMARKS)
-        FetchContent_Declare(
-            googlebenchmark
-            URL https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz
-            URL_HASH SHA256=6bc180a57d23d4d9515519f92b0c83d61b05b5bab188961f36ac7b06b0d9e9ce
-        )
-        set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-        FetchContent_MakeAvailable(googlebenchmark)
+        # Try to use system googlebenchmark first
+        find_package(benchmark QUIET)
 
-        # Remove googlebenchmark's .clang-tidy file which has outdated options
-        # that conflict with newer clang-tidy versions
-        file(REMOVE "${googlebenchmark_SOURCE_DIR}/.clang-tidy")
+        if(NOT benchmark_FOUND)
+            message(STATUS "System benchmark not found, using FetchContent")
+            FetchContent_Declare(
+                googlebenchmark
+                URL https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz
+                URL_HASH SHA256=6bc180a57d23d4d9515519f92b0c83d61b05b5bab188961f36ac7b06b0d9e9ce
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+                TIMEOUT 30
+            )
+            set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+            FetchContent_MakeAvailable(googlebenchmark)
+
+            # Remove googlebenchmark's .clang-tidy file which has outdated options
+            # that conflict with newer clang-tidy versions
+            file(REMOVE "${googlebenchmark_SOURCE_DIR}/.clang-tidy")
+        else()
+            message(STATUS "Using system benchmark")
+        endif()
 
         add_executable(aegisbpf_bench tests/bench_policy.cpp)
         target_link_libraries(aegisbpf_bench PRIVATE
