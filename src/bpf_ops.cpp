@@ -1042,12 +1042,10 @@ Result<void> update_deadman_deadline(BpfState& state, uint64_t deadline_ns)
 
 // Critical binary name patterns to discover via /proc scan
 // These match against basename(exe) to find binaries regardless of installation path
-static const char* kSurvivalBinaryNames[] = {"init",      "systemd",  "kubelet",   "sshd",
-                                              "ssh",       "containerd", "runc",       "crio",
-                                              "dockerd",   "apt",      "apt-get",   "dpkg",
-                                              "yum",       "dnf",      "rpm",       "sh",
-                                              "bash",      "dash",     "sudo",      "su",
-                                              "reboot",    "shutdown", nullptr};
+static const char* kSurvivalBinaryNames[] = {"init", "systemd", "kubelet", "sshd",     "ssh",     "containerd",
+                                             "runc", "crio",    "dockerd", "apt",      "apt-get", "dpkg",
+                                             "yum",  "dnf",     "rpm",     "sh",       "bash",    "dash",
+                                             "sudo", "su",      "reboot",  "shutdown", nullptr};
 
 Result<void> add_survival_entry(BpfState& state, const InodeId& id)
 {
@@ -1093,7 +1091,7 @@ static Result<std::vector<std::pair<pid_t, std::string>>> discover_survival_proc
         char target[PATH_MAX] = {};
         ssize_t len = readlink(exe_path.c_str(), target, sizeof(target) - 1);
         if (len <= 0) {
-            continue;  // Process may have exited or we don't have permission
+            continue; // Process may have exited or we don't have permission
         }
         target[len] = '\0';
 
@@ -1124,7 +1122,7 @@ Result<void> populate_survival_allowlist(BpfState& state)
         // Continue anyway, don't fail the entire operation
     }
 
-    std::set<InodeId> added_inodes;  // Deduplicate by inode
+    std::set<InodeId> added_inodes; // Deduplicate by inode
     int count = 0;
 
     if (proc_result) {
@@ -1180,8 +1178,7 @@ Result<void> populate_survival_allowlist(BpfState& state)
         }
     }
 
-    logger().log(SLOG_INFO("Populated survival allowlist via /proc scan")
-                     .field("count", static_cast<int64_t>(count)));
+    logger().log(SLOG_INFO("Populated survival allowlist via /proc scan").field("count", static_cast<int64_t>(count)));
     return {};
 }
 
