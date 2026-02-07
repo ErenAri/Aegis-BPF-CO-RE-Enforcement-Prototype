@@ -265,7 +265,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-tidy clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build
+          sudo apt-get install -y clang-tidy clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build libgtest-dev libbenchmark-dev
 
       - name: Configure
         run: cmake -S . -B build-clang-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DSKIP_BPF_BUILD=ON

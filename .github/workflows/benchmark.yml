@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build libgtest-dev
+          sudo apt-get install -y clang llvm libbpf-dev libsystemd-dev pkg-config cmake ninja-build libgtest-dev libbenchmark-dev
 
       - name: Configure
         run: cmake -S . -B build-bench -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DSKIP_BPF_BUILD=ON
