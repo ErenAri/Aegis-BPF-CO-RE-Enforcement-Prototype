@@ -2,22 +2,22 @@
 
 **Release Date:** 2026-02-07
 **Type:** CRITICAL Security Fix
-**Status:** ✅ Ready for Production Deployment
+**Status:**  Ready for Production Deployment
 
 ---
 
-## 🚨 URGENT: Critical Security Fix
+##  URGENT: Critical Security Fix
 
 This release fixes a **CRITICAL** memory exhaustion vulnerability. Deploy immediately to all environments.
 
 **Vulnerability:** TweetNaCl memory exhaustion DoS
 **Severity:** CRITICAL
 **Impact:** Availability (memory exhaustion attacks)
-**Status:** ✅ FIXED
+**Status:**  FIXED
 
 ---
 
-## ✅ Pre-Deployment Checklist
+##  Pre-Deployment Checklist
 
 All items completed:
 - [x] Code implemented and tested
@@ -33,7 +33,7 @@ All items completed:
 
 ---
 
-## 📦 What's Included
+##  What's Included
 
 ### New Files
 ```
@@ -56,7 +56,7 @@ docs/CHANGELOG.md                   - Release notes (+60 lines)
 
 ---
 
-## 🚀 Deployment Steps
+##  Deployment Steps
 
 ### Step 1: Verify Current State
 
@@ -72,7 +72,7 @@ git describe --tags
 
 # Run verification script
 ./scripts/verify_security_fix.sh
-# Output: ✅ Security Fix Verification PASSED
+# Output:  Security Fix Verification PASSED
 ```
 
 ### Step 2: Build Release Binary
@@ -188,7 +188,7 @@ for host in prod-{1..N}; do
              sudo cp /usr/local/bin/aegisbpf-0.1.1 /usr/local/bin/aegisbpf && \
              sudo chmod +x /usr/local/bin/aegisbpf && \
              sudo systemctl start aegisbpf"
-  echo "✅ $host deployed"
+  echo " $host deployed"
   sleep 5  # Brief pause between hosts
 done
 ```
@@ -213,7 +213,7 @@ done
 
 ---
 
-## 📊 Monitoring
+##  Monitoring
 
 ### Key Metrics to Watch
 
@@ -248,7 +248,7 @@ rate(aegisbpf_process_start_time_seconds[10m]) > 1
 
 ---
 
-## 🔄 Rollback Plan
+##  Rollback Plan
 
 If issues are discovered:
 
@@ -283,7 +283,7 @@ cat /etc/aegisbpf/policy.conf | wc -c
 
 ---
 
-## ✅ Success Criteria
+##  Success Criteria
 
 Deployment is successful if:
 - [x] Binary version shows v0.1.1
@@ -297,7 +297,7 @@ Deployment is successful if:
 
 ---
 
-## 📞 Support Contacts
+##  Support Contacts
 
 **Issues:**
 - Security concerns: See SECURITY.md for reporting
@@ -311,7 +311,7 @@ Deployment is successful if:
 
 ---
 
-## 🎯 Next Steps
+##  Next Steps
 
 After successful deployment:
 
@@ -333,7 +333,7 @@ After successful deployment:
 
 ---
 
-## 📚 Reference Links
+##  Reference Links
 
 - **Release Tag:** `v0.1.1`
 - **Commit:** `540672d`

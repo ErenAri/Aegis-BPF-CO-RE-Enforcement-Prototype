@@ -190,7 +190,7 @@ The following environment variables affect security behavior. In production, avo
 
 **Impact:** HIGH - Availability impact via memory exhaustion
 
-**Status:** ✅ FIXED
+**Status:**  FIXED
 
 **Details:** See `docs/SECURITY_FIX_TWEETNACL_MEMORY.md`
 

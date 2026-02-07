@@ -45,10 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full backward compatibility verified
 
 ### Compliance
-- ✅ OWASP Top 10 2021 compliant
-- ✅ CERT Secure Coding Standards compliant
-- ✅ CWE/SANS Top 25 compliant
-- ✅ Memory safety guaranteed
+-  OWASP Top 10 2021 compliant
+-  CERT Secure Coding Standards compliant
+-  CWE/SANS Top 25 compliant
+-  Memory safety guaranteed
 
 ### Migration Notes
 - **No breaking changes** - fully backward compatible

@@ -19,7 +19,7 @@ The TweetNaCl library functions `crypto_sign_detached()` and `crypto_sign_verify
 // Lines 546-558 (crypto_sign_detached)
 int crypto_sign_detached(u8* sig, const u8* m, unsigned long long mlen, const u8* sk)
 {
-    u8* sm = (u8*)malloc(mlen + 64);  // ❌ Unbounded heap allocation
+    u8* sm = (u8*)malloc(mlen + 64);  //  Unbounded heap allocation
     if (!sm) return -1;
     // ... signature operations ...
     free(sm);
@@ -29,8 +29,8 @@ int crypto_sign_detached(u8* sig, const u8* m, unsigned long long mlen, const u8
 // Lines 560-576 (crypto_sign_verify_detached)
 int crypto_sign_verify_detached(const u8* sig, const u8* m, unsigned long long mlen, const u8* pk)
 {
-    u8* sm = (u8*)malloc(mlen + 64);   // ❌ Unbounded heap allocation
-    u8* tmp = (u8*)malloc(mlen + 64);  // ❌ Unbounded heap allocation
+    u8* sm = (u8*)malloc(mlen + 64);   //  Unbounded heap allocation
+    u8* tmp = (u8*)malloc(mlen + 64);  //  Unbounded heap allocation
     // ... verification operations ...
     free(sm);
     free(tmp);
@@ -71,10 +71,10 @@ inline int crypto_sign_detached_safe(uint8_t* sig, const uint8_t* m,
                                       unsigned long long mlen, const uint8_t* sk)
 {
     if (mlen > kMaxMessageSize) {
-        return -1;  // ✅ Reject oversized messages
+        return -1;  //  Reject oversized messages
     }
 
-    // ✅ Stack allocation - no heap pressure
+    //  Stack allocation - no heap pressure
     uint8_t sm[kMaxMessageSize + 64];
     unsigned long long smlen;
 
@@ -83,7 +83,7 @@ inline int crypto_sign_detached_safe(uint8_t* sig, const uint8_t* m,
         std::memcpy(sig, sm, 64);
     }
 
-    // ✅ Clear sensitive data from stack
+    //  Clear sensitive data from stack
     volatile uint8_t* volatile_sm = sm;
     for (size_t i = 0; i < sizeof(sm); ++i) {
         volatile_sm[i] = 0;
@@ -103,7 +103,7 @@ Updated `src/crypto.cpp` to use safe wrappers:
 Result<Signature> sign_bytes(const uint8_t* data, size_t data_len, const SecretKey& secret_key)
 {
     Signature sig{};
-    // ✅ Use safe wrapper
+    //  Use safe wrapper
     if (crypto_safe::crypto_sign_detached_safe(sig.data(), data, data_len, secret_key.data()) != 0) {
         return Error(ErrorCode::CryptoError, "Failed to sign message (message may be too large)");
     }
@@ -112,7 +112,7 @@ Result<Signature> sign_bytes(const uint8_t* data, size_t data_len, const SecretK
 
 bool verify_bytes(const uint8_t* data, size_t data_len, const Signature& signature, const PublicKey& public_key)
 {
-    // ✅ Use safe wrapper
+    //  Use safe wrapper
     return crypto_safe::crypto_sign_verify_detached_safe(signature.data(), data, data_len, public_key.data()) == 0;
 }
 ```
@@ -134,7 +134,7 @@ TEST_F(CryptoSafeTest, PolicySignatureStringsFitWithinLimit) {
     std::string policy_sha256(64, 'a');
     std::string sign_data = policy_sha256 + "18446744073709551615" +
                             "18446744073709551615" + "18446744073709551615";
-    EXPECT_LT(sign_data.size(), 200);  // ✅ Well under 4096 limit
+    EXPECT_LT(sign_data.size(), 200);  //  Well under 4096 limit
 }
 ```
 
@@ -169,15 +169,15 @@ All 153 unit tests pass, including 9 new crypto safety tests:
 ## Backward Compatibility
 
 ### API Compatibility
-✅ **Fully backward compatible** - no API changes to public functions
+ **Fully backward compatible** - no API changes to public functions
 
 ### Functional Changes
-⚠️ **New limitation:** Messages > 4096 bytes now rejected
+ **New limitation:** Messages > 4096 bytes now rejected
 - **Impact:** None - no legitimate use cases sign messages > 200 bytes
 - **Mitigation:** Error message indicates size limitation
 
 ### Performance Impact
-✅ **Neutral to positive:**
+ **Neutral to positive:**
 - Stack allocation faster than heap allocation
 - No fragmentation or GC pressure
 - Same computational complexity
@@ -194,9 +194,9 @@ CMakeLists.txt                  (MOD)  - Add new test file
 ## Deployment Recommendations
 
 ### Immediate Actions
-1. ✅ Deploy patched version to all environments
-2. ✅ Run test suite to verify functionality
-3. ⚠️ Monitor for signature verification errors in logs
+1.  Deploy patched version to all environments
+2.  Run test suite to verify functionality
+3.  Monitor for signature verification errors in logs
 
 ### Monitoring
 Add alerts for:
