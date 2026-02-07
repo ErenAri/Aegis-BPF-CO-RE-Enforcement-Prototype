@@ -3,32 +3,32 @@
 **AegisBPF** is an eBPF-based runtime security agent that monitors and blocks unauthorized file access using Linux Security Modules (LSM). It provides kernel-level enforcement with minimal overhead.
 
 ```
-
-                              AegisBPF                                          
-                                                                               
-                   
-     File/Net         Allow           Policy          Metrics          
-    deny rules       allowlist      + signatures      + health         
-                   
-                       
-                                                                              
-                                                             
-                               Pinned BPF Maps                               
-                               + Ring Buffer                                 
-                                                             
-                                                                              
-
-                               KERNEL                                         
-                                                  
-                          LSM hooks (enforce/audit)                          
-                          file_open/inode_permission                         
-                          socket_connect/socket_bind                         
-                                                  
-                                                   
-                          Tracepoint fallback                                
-                          openat/exec/fork/exit                              
-                                                   
-
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                              AegisBPF                                         │
+│                                                                               │
+│   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐    ┌─────────────┐      │
+│   │  File/Net   │   │   Allow     │   │   Policy    │    │  Metrics    │      │
+│   │ deny rules  │   │  allowlist  │   │ + signatures│    │  + health   │      │
+│   └──────┬──────┘   └──────┬──────┘   └──────┬──────┘    └──────┬──────┘      │
+│          └─────────────────┴─────────────────┴──────────────────┘             │
+│                                      │                                        │
+│                              ┌───────┴────────┐                               │
+│                              │ Pinned BPF Maps│                               │
+│                              │ + Ring Buffer  │                               │
+│                              └───────┬────────┘                               │
+│                                      │                                        │
+├──────────────────────────────────────┼────────────────────────────────────────┤
+│                               KERNEL │                                        │
+│                         ┌────────────┴──────────────┐                         │
+│                         │ LSM hooks (enforce/audit) │                         │
+│                         │ file_open/inode_permission│                         │
+│                         │ socket_connect/socket_bind│                         │
+│                         └────────────┬──────────────┘                         │
+│                         ┌────────────┴─────────────┐                          │
+│                         │ Tracepoint fallback      │                          │
+│                         │ openat/exec/fork/exit    │                          │
+│                         └──────────────────────────┘                          │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Features
